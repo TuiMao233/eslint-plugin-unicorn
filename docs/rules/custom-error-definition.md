@@ -1,9 +1,13 @@
-# Enforce correct Error subclassing
+# Enforce correct `Error` subclassing
+
+🚫 This rule is _disabled_ in the ✅ `recommended` [config](https://github.com/sindresorhus/eslint-plugin-unicorn#preset-configs).
+
+🔧 This rule is automatically fixable by the [`--fix` CLI option](https://eslint.org/docs/latest/user-guide/command-line-interface#--fix).
+
+<!-- end auto-generated rule header -->
+<!-- Do not manually modify this header. Run: `npm run fix:eslint-docs` -->
 
 Enforces the only valid way of `Error` subclassing. It works with any super class that ends in `Error`.
-
-This rule is fixable.
-
 
 ## Fail
 
@@ -19,7 +23,6 @@ class CustomError extends Error {
 
 The `this.message` assignment is useless as it's already set via the `super()` call.
 
-
 ```js
 class CustomError extends Error {
 	constructor(message) {
@@ -32,7 +35,6 @@ class CustomError extends Error {
 
 Pass the error message to `super()` instead of setting `this.message`.
 
-
 ```js
 class CustomError extends Error {
 	constructor(message) {
@@ -42,7 +44,6 @@ class CustomError extends Error {
 ```
 
 No `name` property set. The name property is needed so the error shows up as `[CustomError: foo]` and not `[Error: foo]`.
-
 
 ```js
 class CustomError extends Error {
@@ -55,7 +56,6 @@ class CustomError extends Error {
 
 Use a string literal to set the `name` property as it will not change after minifying.
 
-
 ```js
 class CustomError extends Error {
 	constructor(message) {
@@ -67,7 +67,6 @@ class CustomError extends Error {
 
 The `name` property should be set to the class name.
 
-
 ```js
 class foo extends Error {
 	constructor(message) {
@@ -78,7 +77,6 @@ class foo extends Error {
 ```
 
 The class name is invalid. It should be capitalized and end with `Error`. In this case it should be `FooError`.
-
 
 ## Pass
 

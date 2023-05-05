@@ -1,5 +1,5 @@
 import outdent from 'outdent';
-import {getTester} from './utils/test.mjs';
+import {getTester, parsers} from './utils/test.mjs';
 
 const {test} = getTester(import.meta);
 
@@ -51,10 +51,26 @@ test({
 		'array.push(undefined);',
 		'array.unshift(foo, undefined);',
 		'array.unshift(undefined);',
+		'createContext(undefined);',
+		'React.createContext(undefined);',
+		'array.includes(undefined)',
+		'set.has(undefined)',
+
+		// `Function#bind()`
+		'foo.bind(bar, undefined)',
+		'foo.bind(...bar, undefined)',
+		'foo.bind(...[], undefined)',
+		'foo.bind(...[undefined], undefined)',
+		'foo.bind(bar, baz, undefined)',
+		'foo?.bind(bar, undefined)',
 
 		// `checkArguments: false`
 		{
 			code: 'foo(undefined, undefined);',
+			options: optionsIgnoreArguments,
+		},
+		{
+			code: 'foo.bind(undefined);',
 			options: optionsIgnoreArguments,
 		},
 	],
@@ -276,6 +292,8 @@ test.typescript({
 		'const foo = (): string => undefined;',
 		'const foo = function (): undefined {return undefined}',
 		'export function foo(): undefined {return undefined}',
+		'createContext<T>(undefined);',
+		'React.createContext<T>(undefined);',
 		outdent`
 			const object = {
 				method(): undefined {
@@ -332,6 +350,8 @@ test.typescript({
 				}
 			}
 		`,
+		'createContext<T>(undefined);',
+		'React.createContext<T>(undefined);',
 	],
 	invalid: [
 		{
@@ -410,6 +430,44 @@ test.snapshot({
 				)
 				/* */
 			);
+		`,
+		'foo.bind(undefined)',
+		'bind(foo, undefined)',
+		'foo.bind?.(bar, undefined)',
+		'foo[bind](bar, undefined)',
+		'foo.notBind(bar, undefined)',
+	],
+});
+
+test.snapshot({
+	testerOptions: {
+		parser: parsers.vue,
+	},
+	valid: [
+		outdent`
+			<script>
+			import {ref} from 'vue';
+
+			export default {
+				setup() {
+					return {foo: ref(undefined)};
+				}
+			};
+			</script>
+		`,
+		outdent`
+			<script setup>
+			import * as vue from 'vue';
+			const foo = vue.ref(undefined);
+			</script>
+		`,
+	],
+	invalid: [
+		outdent`
+			<script>
+			import {nextTick} from 'vue';
+			const foo = nextTick(undefined);
+			</script>
 		`,
 	],
 });

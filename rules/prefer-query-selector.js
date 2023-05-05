@@ -1,5 +1,6 @@
 'use strict';
 const {methodCallSelector, notDomNodeSelector} = require('./selectors/index.js');
+const {isStringLiteral, isNullLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID = 'prefer-query-selector';
 const messages = {
@@ -14,7 +15,7 @@ const selector = [
 	notDomNodeSelector('callee.object'),
 ].join('');
 
-const forbiddenIdentifierNames = new Map([
+const disallowedIdentifierNames = new Map([
 	['getElementById', 'querySelector'],
 	['getElementsByClassName', 'querySelectorAll'],
 	['getElementsByTagName', 'querySelectorAll'],
@@ -63,20 +64,14 @@ function * getTemplateLiteralFix(fixer, node, identifierName) {
 	}
 }
 
-const canBeFixed = node => {
-	if (node.type === 'Literal') {
-		return node.raw === 'null' || (typeof node.value === 'string' && Boolean(node.value.trim()));
-	}
-
-	if (node.type === 'TemplateLiteral') {
-		return (
-			node.expressions.length === 0
-			&& node.quasis.some(templateElement => templateElement.value.cooked.trim())
-		);
-	}
-
-	return false;
-};
+const canBeFixed = node =>
+	isNullLiteral(node)
+	|| (isStringLiteral(node) && Boolean(node.value.trim()))
+	|| (
+		node.type === 'TemplateLiteral'
+		&& node.expressions.length === 0
+		&& node.quasis.some(templateElement => templateElement.value.cooked.trim())
+	);
 
 const hasValue = node => {
 	if (node.type === 'Literal') {
@@ -99,10 +94,11 @@ const fix = (node, identifierName, preferredSelector) => {
 	};
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = () => ({
 	[selector](node) {
 		const method = node.callee.property.name;
-		const preferredSelector = forbiddenIdentifierNames.get(method);
+		const preferredSelector = disallowedIdentifierNames.get(method);
 
 		const problem = {
 			node: node.callee.property,
@@ -121,6 +117,7 @@ const create = () => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

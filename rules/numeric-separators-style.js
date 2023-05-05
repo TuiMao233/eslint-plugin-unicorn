@@ -1,5 +1,6 @@
 'use strict';
 const numeric = require('./utils/numeric.js');
+const {isBigIntLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID = 'numeric-separators-style';
 const messages = {
@@ -97,7 +98,7 @@ const create = context => {
 	};
 
 	return {
-		Literal: node => {
+		Literal(node) {
 			if (!numeric.isNumeric(node) || numeric.isLegacyOctal(node)) {
 				return;
 			}
@@ -105,7 +106,7 @@ const create = context => {
 			const {raw} = node;
 			let number = raw;
 			let suffix = '';
-			if (numeric.isBigInt(node)) {
+			if (isBigIntLiteral(node)) {
 				number = raw.slice(0, -1);
 				suffix = 'n';
 			}
@@ -133,6 +134,7 @@ const create = context => {
 
 const formatOptionsSchema = ({minimumDigits, groupLength}) => ({
 	type: 'object',
+	additionalProperties: false,
 	properties: {
 		onlyIfContainsSeparator: {
 			type: 'boolean',
@@ -148,11 +150,11 @@ const formatOptionsSchema = ({minimumDigits, groupLength}) => ({
 			default: groupLength,
 		},
 	},
-	additionalProperties: false,
 });
 
 const schema = [{
 	type: 'object',
+	additionalProperties: false,
 	properties: {
 		...Object.fromEntries(
 			Object.entries(defaultOptions).map(([type, options]) => [type, formatOptionsSchema(options)]),
@@ -162,9 +164,9 @@ const schema = [{
 			default: false,
 		},
 	},
-	additionalProperties: false,
 }];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

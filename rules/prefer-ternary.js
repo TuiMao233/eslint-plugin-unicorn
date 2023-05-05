@@ -1,5 +1,5 @@
 'use strict';
-const {isParenthesized} = require('eslint-utils');
+const {isParenthesized} = require('@eslint-community/eslint-utils');
 const avoidCapture = require('./utils/avoid-capture.js');
 const needsSemicolon = require('./utils/needs-semicolon.js');
 const isSameReference = require('./utils/is-same-reference.js');
@@ -19,10 +19,10 @@ const selector = [
 	'[alternate]',
 ].join('');
 
-const isTernary = node => node && node.type === 'ConditionalExpression';
+const isTernary = node => node?.type === 'ConditionalExpression';
 
 function getNodeBody(node) {
-	/* istanbul ignore next */
+	/* c8 ignore next 3 */
 	if (!node) {
 		return;
 	}
@@ -43,6 +43,7 @@ function getNodeBody(node) {
 
 const isSingleLineNode = node => node.loc.start.line === node.loc.end.line;
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const onlySingleLine = context.options[0] === 'only-single-line';
 	const sourceCode = context.getSourceCode();
@@ -193,61 +194,65 @@ const create = context => {
 				return;
 			}
 
-			const scope = context.getScope();
+			const problem = {node, messageId};
 
-			return {
-				node,
-				messageId,
-				* fix(fixer) {
-					const testText = getText(node.test);
-					const consequentText = typeof result.consequent === 'string'
-						? result.consequent
-						: getText(result.consequent);
-					const alternateText = typeof result.alternate === 'string'
-						? result.alternate
-						: getText(result.alternate);
+			// Don't fix if there are comments
+			if (sourceCode.getCommentsInside(node).length > 0) {
+				return problem;
+			}
 
-					let {type, before, after} = result;
+			const scope = sourceCode.getScope(node);
+			problem.fix = function * (fixer) {
+				const testText = getText(node.test);
+				const consequentText = typeof result.consequent === 'string'
+					? result.consequent
+					: getText(result.consequent);
+				const alternateText = typeof result.alternate === 'string'
+					? result.alternate
+					: getText(result.alternate);
 
-					let generateNewVariables = false;
-					if (type === 'ThrowStatement') {
-						const scopes = getScopes(scope);
-						const errorName = avoidCapture('error', scopes, isSafeName);
+				let {type, before, after} = result;
 
-						for (const scope of scopes) {
-							if (!scopeToNamesGeneratedByFixer.has(scope)) {
-								scopeToNamesGeneratedByFixer.set(scope, new Set());
-							}
+				let generateNewVariables = false;
+				if (type === 'ThrowStatement') {
+					const scopes = getScopes(scope);
+					const errorName = avoidCapture('error', scopes, isSafeName);
 
-							const generatedNames = scopeToNamesGeneratedByFixer.get(scope);
-							generatedNames.add(errorName);
+					for (const scope of scopes) {
+						if (!scopeToNamesGeneratedByFixer.has(scope)) {
+							scopeToNamesGeneratedByFixer.set(scope, new Set());
 						}
 
-						const indentString = getIndentString(node, sourceCode);
-
-						after = after
-							.replace('{{INDENT_STRING}}', indentString)
-							.replace('{{ERROR_NAME}}', errorName);
-						before = before
-							.replace('{{INDENT_STRING}}', indentString)
-							.replace('{{ERROR_NAME}}', errorName);
-						generateNewVariables = true;
+						const generatedNames = scopeToNamesGeneratedByFixer.get(scope);
+						generatedNames.add(errorName);
 					}
 
-					let fixed = `${before}${testText} ? ${consequentText} : ${alternateText}${after}`;
-					const tokenBefore = sourceCode.getTokenBefore(node);
-					const shouldAddSemicolonBefore = needsSemicolon(tokenBefore, sourceCode, fixed);
-					if (shouldAddSemicolonBefore) {
-						fixed = `;${fixed}`;
-					}
+					const indentString = getIndentString(node, sourceCode);
 
-					yield fixer.replaceText(node, fixed);
+					after = after
+						.replace('{{INDENT_STRING}}', indentString)
+						.replace('{{ERROR_NAME}}', errorName);
+					before = before
+						.replace('{{INDENT_STRING}}', indentString)
+						.replace('{{ERROR_NAME}}', errorName);
+					generateNewVariables = true;
+				}
 
-					if (generateNewVariables) {
-						yield * extendFixRange(fixer, sourceCode.ast.range);
-					}
-				},
+				let fixed = `${before}${testText} ? ${consequentText} : ${alternateText}${after}`;
+				const tokenBefore = sourceCode.getTokenBefore(node);
+				const shouldAddSemicolonBefore = needsSemicolon(tokenBefore, sourceCode, fixed);
+				if (shouldAddSemicolonBefore) {
+					fixed = `;${fixed}`;
+				}
+
+				yield fixer.replaceText(node, fixed);
+
+				if (generateNewVariables) {
+					yield * extendFixRange(fixer, sourceCode.ast.range);
+				}
 			};
+
+			return problem;
 		},
 	};
 };
@@ -259,6 +264,7 @@ const schema = [
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

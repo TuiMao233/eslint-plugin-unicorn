@@ -18,9 +18,16 @@ test.snapshot({
 		'++ array[array.length - 1]',
 		'array[array.length - 1] --',
 		'delete array[array.length - 1]',
+		'class Foo {bar; #bar; baz() {return this.#bar[this.bar.length - 1]}}',
+		'([array[array.length - 1]] = [])',
+		'({foo: array[array.length - 1] = 9} = {})',
 	],
 	invalid: [
 		'array[array.length - 1];',
+		'array[array.length -1];',
+		'array[array.length - /* comment */ 1];',
+		'array[array.length - 1.];',
+		'array[array.length - 0b1];',
 		'array[array.length - 9];',
 		'array[0][array[0].length - 1];',
 		'array[(( array.length )) - 1];',
@@ -33,6 +40,9 @@ test.snapshot({
 		'const a = array[array.length - 1]',
 		'const {a = array[array.length - 1]} = {}',
 		'typeof array[array.length - 1]',
+		'function foo() {return arguments[arguments.length - 1]}',
+		'class Foo {bar; baz() {return this.bar[this.bar.length - 1]}}',
+		'class Foo {#bar; baz() {return this.#bar[this.#bar.length - 1]}}',
 	],
 });
 
@@ -170,6 +180,7 @@ test.snapshot({
 			code: '_.last(getLast(utils.lastOne(array)))',
 			options: [{getLastElementFunctions: ['getLast', '  utils.lastOne  ']}],
 		},
+		'function foo() {return _.last(arguments)}',
 	],
 });
 

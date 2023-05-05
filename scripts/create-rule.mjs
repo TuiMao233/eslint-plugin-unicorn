@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import enquirer from 'enquirer';
 import {template} from 'lodash-es';
-import execa from 'execa';
+import {execa} from 'execa';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(dirname, '..');
@@ -36,20 +35,20 @@ function renderTemplate({source, target, data}) {
 	return fs.writeFileSync(targetFile, content);
 }
 
-function updateIndex(id) {
-	const RULE_START = '\t\t\trules: {\n';
-	const RULE_END = '\n\t\t\t}';
-	const RULE_INDENT = '\t'.repeat(4);
+function updateRecommended(id) {
+	const RULE_START = '\n\trules: {\n';
+	const RULE_END = '\n\t}';
+	const RULE_INDENT = '\t'.repeat(2);
 	let ruleContent = `${RULE_INDENT}'unicorn/${id}': 'error',`;
 
-	const file = path.join(ROOT, 'index.js');
+	const file = path.join(ROOT, 'configs/recommended.js');
 	const content = fs.readFileSync(file, 'utf8');
 	const [before, rest] = content.split(RULE_START);
 	const [rules, after] = rest.split(RULE_END);
 
 	const lines = rules.split('\n');
 	if (!lines.every(line => line.startsWith(RULE_INDENT))) {
-		throw new Error('Unexpected content in “index.js”.');
+		throw new Error('Unexpected content in “configs/recommended.js”.');
 	}
 
 	const unicornRuleLines = lines.filter(line => line.startsWith(`${RULE_INDENT}'unicorn/`));
@@ -73,8 +72,8 @@ function updateIndex(id) {
 	fs.writeFileSync(file, updated);
 }
 
-(async () => {
-	const data = await enquirer.prompt([
+async function getData() {
+	const questions = [
 		{
 			type: 'input',
 			name: 'id',
@@ -107,20 +106,8 @@ function updateIndex(id) {
 			type: 'select',
 			name: 'fixableType',
 			message: 'Is it fixable?',
-			choices: [
-				{
-					message: 'Code',
-					value: 'code',
-				},
-				{
-					message: 'Whitespace',
-					value: 'whitespace',
-				},
-				{
-					message: 'No',
-					value: false,
-				},
-			],
+			choices: ['Code', 'Whitespace', 'No'],
+			result: value => value === 'No' ? false : value.toLowerCase(),
 		},
 		{
 			type: 'select',
@@ -132,42 +119,47 @@ function updateIndex(id) {
 				'layout',
 			],
 		},
-	]);
+		{
+			type: 'select',
+			name: 'hasSuggestions',
+			message: 'Does it provides suggestions?',
+			choices: ['Yes', 'No'],
+			result: value => value === 'Yes',
+		},
+	];
 
-	if (data.fixableType === 'No') {
-		data.fixableType = false;
-	}
+	const data = await enquirer.prompt(questions);
 
-	const {id} = data;
+	return data;
+}
 
-	checkFiles(id);
-	renderTemplate({
-		source: 'documentation.md.jst',
-		target: `docs/rules/${id}.md`,
-		data,
-	});
-	renderTemplate({
-		source: 'rule.js.jst',
-		target: `rules/${id}.js`,
-		data,
-	});
-	renderTemplate({
-		source: 'test.mjs.jst',
-		target: `test/${id}.mjs`,
-		data,
-	});
-	updateIndex(id);
+const data = await getData();
+const {id} = data;
 
-	try {
-		await execa('code', [
-			'--new-window',
-			'.',
-			`docs/rules/${id}.md`,
-			`rules/${id}.js`,
-			`test/${id}.mjs`,
-		], {cwd: ROOT});
-	} catch {}
-})().catch(error => {
-	console.error(error);
-	process.exit(1);
+checkFiles(id);
+renderTemplate({
+	source: 'documentation.md.jst',
+	target: `docs/rules/${id}.md`,
+	data,
 });
+renderTemplate({
+	source: 'rule.js.jst',
+	target: `rules/${id}.js`,
+	data,
+});
+renderTemplate({
+	source: 'test.mjs.jst',
+	target: `test/${id}.mjs`,
+	data,
+});
+updateRecommended(id);
+
+try {
+	await execa('code', [
+		'--new-window',
+		'.',
+		`docs/rules/${id}.md`,
+		`rules/${id}.js`,
+		`test/${id}.mjs`,
+	], {cwd: ROOT});
+} catch {}

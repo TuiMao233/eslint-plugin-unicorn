@@ -1,21 +1,23 @@
-import fs from 'node:fs';
+import fs, {promises as fsAsync} from 'node:fs';
 import path from 'node:path';
 import test from 'ava';
-import pify from 'pify';
-import index from '../index.js';
+import {ESLint} from 'eslint';
+import * as eslintrc from '@eslint/eslintrc';
+import eslintPluginUnicorn from '../index.js';
 
 let ruleFiles;
 
 test.before(async () => {
-	const files = await pify(fs.readdir)('rules');
+	const files = await fsAsync.readdir('rules');
 	ruleFiles = files.filter(file => path.extname(file) === '.js');
 });
 
 const ignoredRules = [
 	'no-nested-ternary',
+	'no-negated-condition',
 ];
 
-const deprecatedRules = Object.entries(index.rules)
+const deprecatedRules = Object.entries(eslintPluginUnicorn.rules)
 	.filter(([, {meta: {deprecated}}]) => deprecated)
 	.map(([ruleId]) => ruleId);
 
@@ -30,12 +32,22 @@ const testSorted = (t, actualOrder, sourceName) => {
 	}
 };
 
+const RULES_WITHOUT_PASS_FAIL_SECTIONS = new Set([
+	// Doesn't show code samples since it's just focused on filenames.
+	'filename-case',
+	// Intended to not use `pass`/`fail` section in this rule.
+	'prefer-modern-math-apis',
+]);
+
 test('Every rule is defined in index file in alphabetical order', t => {
 	for (const file of ruleFiles) {
 		const name = path.basename(file, '.js');
-		t.truthy(index.rules[name], `'${name}' is not exported in 'index.js'`);
+		t.truthy(eslintPluginUnicorn.rules[name], `'${name}' is not exported in 'index.js'`);
 		if (!deprecatedRules.includes(name)) {
-			t.truthy(index.configs.recommended.rules[`unicorn/${name}`], `'${name}' is not set in the recommended config`);
+			t.truthy(
+				eslintPluginUnicorn.configs.recommended.rules[`unicorn/${name}`],
+				`'${name}' is not set in the recommended config`,
+			);
 		}
 
 		t.truthy(fs.existsSync(path.join('docs/rules', `${name}.md`)), `There is no documentation for '${name}'`);
@@ -43,60 +55,110 @@ test('Every rule is defined in index file in alphabetical order', t => {
 	}
 
 	t.is(
-		Object.keys(index.rules).length - deprecatedRules.length,
+		Object.keys(eslintPluginUnicorn.rules).length - deprecatedRules.length,
 		ruleFiles.length,
 		'There are more exported rules than rule files.',
 	);
 	t.is(
-		Object.keys(index.configs.recommended.rules).length - deprecatedRules.length - ignoredRules.length,
+		Object.keys(eslintPluginUnicorn.configs.recommended.rules).length - deprecatedRules.length - ignoredRules.length,
 		ruleFiles.length - deprecatedRules.length,
 		'There are more exported rules in the recommended config than rule files.',
 	);
+	t.is(
+		Object.keys(eslintPluginUnicorn.configs.all.rules).length - deprecatedRules.length - ignoredRules.length,
+		ruleFiles.length - deprecatedRules.length,
+		'There are more rules than those exported in the all config.',
+	);
 
-	testSorted(t, Object.keys(index.configs.recommended.rules), 'configs.recommended.rules');
+	testSorted(t, Object.keys(eslintPluginUnicorn.configs.recommended.rules), 'configs.recommended.rules');
 });
 
-test('Every rule is defined in readme.md usage and list of rules in alphabetical order', async t => {
-	const readme = await pify(fs.readFile)('readme.md', 'utf8');
-	let usageRules;
-	try {
-		const usageRulesMatch = /<!-- USAGE_EXAMPLE_START -->.*?"rules": (?<rules>{.*?}).*?<!-- USAGE_EXAMPLE_END -->/ms.exec(readme);
-		t.truthy(usageRulesMatch, 'List of rules should be defined in readme.md ## Usage');
-		usageRules = JSON.parse(usageRulesMatch.groups.rules);
-	} catch {}
+test('validate configuration', async t => {
+	const results = await Promise.all(
+		Object.entries(eslintPluginUnicorn.configs).map(async ([name, config]) => {
+			const eslint = new ESLint({
+				baseConfig: config,
+				useEslintrc: false,
+				plugins: {
+					unicorn: eslintPluginUnicorn,
+				},
+			});
 
-	t.truthy(usageRules, 'List of rules should be defined in readme.md ## Usage and be valid JSON');
+			const result = await eslint.calculateConfigForFile('dummy.js');
 
-	const rulesMatch = /<!-- RULES_TABLE_START -->(?<rulesText>.*?)<!-- RULES_TABLE_END -->/ms.exec(readme);
-	t.truthy(rulesMatch, 'List of rules should be defined in readme.md in ## Rules before ## Recommended config');
-	const {rulesText} = rulesMatch.groups;
-	const re = /\| \[(?<id>.*?)]\((?<link>.*?)\) \| (?<description>.*) \| (?<recommended>.*?) \| (?<fixable>.*?) \| (?<hasSuggestions>.*?)\n/gm;
-	const rules = [];
-	let match;
-	do {
-		match = re.exec(rulesText);
-		if (match) {
-			const {id, link, description} = match.groups;
-			t.is(link, `docs/rules/${id}.md`, `${id} link to docs should be correct`);
-			t.true(description.trim().length > 0, `${id} should have description in readme.md ## Rules`);
-			rules.push(id);
-		}
-	} while (match);
+			return {name, config, result};
+		}),
+	);
 
-	const availableRules = ruleFiles
-		.map(file => path.basename(file, '.js'))
-		.filter(name => !deprecatedRules.includes(name));
-
-	for (const name of availableRules) {
-		t.truthy(usageRules[`unicorn/${name}`], `'${name}' is not described in the readme.md ## Usage`);
-		t.truthy(rules.includes(name), `'${name}' is not described in the readme.md ## Rules`);
+	for (const {name, config, result} of results) {
+		t.deepEqual(
+			Object.keys(result.rules),
+			Object.keys(config.rules),
+			`Configuration for "${name}" is invalid.`,
+		);
 	}
 
-	t.is(Object.keys(usageRules).length - ignoredRules.length, availableRules.length, 'There are more rules in readme.md ## Usage than rule files.');
-	t.is(Object.keys(rules).length, availableRules.length, 'There are more rules in readme.md ## Rules than rule files.');
+	// `env`
+	{
+		// https://github.com/eslint/eslint/blob/32ac37a76b2e009a8f106229bc7732671d358189/conf/globals.js#L19
+		const testObjects = [
+			'undefinedGlobalObject',
+			// `es3`
+			'Array',
+			// `es5`
+			'JSON',
+			// `es2015`(`es6`)
+			'Promise',
+			// `es2021`
+			'WeakRef',
+		];
+		const baseOptions = {
+			useEslintrc: false,
+			plugins: {
+				unicorn: eslintPluginUnicorn,
+			},
+			overrideConfig: {
+				rules: {
+					'no-undef': 'error',
+				},
+			},
+		};
+		const getUndefinedGlobals = async options => {
+			const [{messages}] = await new ESLint({...baseOptions, ...options}).lintText(testObjects.join(';\n'));
+			return messages.map(({message}) => message.match(/^'(?<object>.*)' is not defined\.$/).groups.object);
+		};
 
-	testSorted(t, Object.keys(usageRules), 'readme.md ## Usage rules');
-	testSorted(t, rules, 'readme.md ## Rules');
+		t.deepEqual(await getUndefinedGlobals(), ['undefinedGlobalObject', 'Promise', 'WeakRef']);
+		t.deepEqual(await getUndefinedGlobals({baseConfig: eslintPluginUnicorn.configs.recommended}), ['undefinedGlobalObject']);
+
+		const availableEnvironments = [...eslintrc.Legacy.environments.keys()].filter(name => /^es\d+$/.test(name));
+		const recommendedEnvironments = Object.keys(eslintPluginUnicorn.configs.recommended.env);
+		t.is(recommendedEnvironments.length, 1);
+		t.is(
+			availableEnvironments[availableEnvironments.length - 1],
+			recommendedEnvironments[0],
+			'env should be the latest es version',
+		);
+	}
+
+	// `sourceType`
+	{
+		const text = 'import fs from "node:fs";';
+		const baseOptions = {
+			useEslintrc: false,
+			plugins: {
+				unicorn: eslintPluginUnicorn,
+			},
+		};
+		const runEslint = async options => {
+			const [{messages}] = await new ESLint({...baseOptions, ...options}).lintText(text);
+			return messages;
+		};
+
+		const [{message}] = await runEslint();
+		t.is(message, 'Parsing error: The keyword \'import\' is reserved');
+		t.deepEqual(await runEslint({baseConfig: eslintPluginUnicorn.configs.recommended}), []);
+	}
 });
 
 test('Every rule has valid meta.type', t => {
@@ -104,7 +166,7 @@ test('Every rule has valid meta.type', t => {
 
 	for (const file of ruleFiles) {
 		const name = path.basename(file, '.js');
-		const rule = index.rules[name];
+		const rule = eslintPluginUnicorn.rules[name];
 
 		t.true(rule.meta !== null && rule.meta !== undefined, `${name} has no meta`);
 		t.is(typeof rule.meta.type, 'string', `${name} meta.type is not string`);
@@ -112,15 +174,39 @@ test('Every rule has valid meta.type', t => {
 	}
 });
 
-test('Every deprecated rules listed in docs/deprecated-rules.md', t => {
-	const content = fs.readFileSync('docs/deprecated-rules.md', 'utf8');
+test('Every deprecated rules listed in docs/deprecated-rules.md', async t => {
+	const content = await fsAsync.readFile('docs/deprecated-rules.md', 'utf8');
 	const rulesInMarkdown = content.match(/(?<=^## ).*?$/gm);
 	t.deepEqual(deprecatedRules, rulesInMarkdown);
 
 	for (const name of deprecatedRules) {
-		const rule = index.rules[name];
+		const rule = eslintPluginUnicorn.rules[name];
 		t.is(typeof rule.create, 'function', `${name} create is not function`);
 		t.deepEqual(rule.create(), {}, `${name} create should return empty object`);
 		t.true(rule.meta.deprecated, `${name} meta.deprecated should be true`);
+	}
+});
+
+test('Every rule file has the appropriate contents', t => {
+	for (const ruleFile of ruleFiles) {
+		const ruleName = path.basename(ruleFile, '.js');
+		const rulePath = path.join('rules', `${ruleName}.js`);
+		const ruleContents = fs.readFileSync(rulePath, 'utf8');
+
+		t.true(ruleContents.includes('/** @type {import(\'eslint\').Rule.RuleModule} */'), `${ruleName} includes jsdoc comment for rule type`);
+	}
+});
+
+test('Every rule has a doc with the appropriate content', t => {
+	for (const ruleFile of ruleFiles) {
+		const ruleName = path.basename(ruleFile, '.js');
+		const documentPath = path.join('docs/rules', `${ruleName}.md`);
+		const documentContents = fs.readFileSync(documentPath, 'utf8');
+
+		// Check for examples.
+		if (!RULES_WITHOUT_PASS_FAIL_SECTIONS.has(ruleName)) {
+			t.true(documentContents.includes('## Pass'), `${ruleName} includes '## Pass' examples section`);
+			t.true(documentContents.includes('## Fail'), `${ruleName} includes '## Fail' examples section`);
+		}
 	}
 });

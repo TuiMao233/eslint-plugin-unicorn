@@ -1,5 +1,12 @@
 # Prevent abbreviations
 
+💼 This rule is enabled in the ✅ `recommended` [config](https://github.com/sindresorhus/eslint-plugin-unicorn#preset-configs).
+
+🔧 This rule is automatically fixable by the [`--fix` CLI option](https://eslint.org/docs/latest/user-guide/command-line-interface#--fix).
+
+<!-- end auto-generated rule header -->
+<!-- Do not manually modify this header. Run: `npm run fix:eslint-docs` -->
+
 Using complete words results in more readable code. Not everyone knows all your abbreviations. Code is written only once, but read many times.
 
 This rule can also be used to replace terms, disallow words, etc. See the [`replacements`](#replacements) and [`extendDefaultReplacements`](#extenddefaultreplacements) options.
@@ -75,6 +82,7 @@ Lowercase replacements will match both complete identifiers and separate words i
 Camelcase replacements will only match complete identifiers. For example `errCb` will only match `errCb` and `ErrCb`. It will not match `fooErrCb` or `errCbFoo`.
 
 The example below:
+
 - disables the default `e` → `event` replacement (leaving `e` → `error` enabled),
 - disables `res` replacement completely (both `res` → `response` and `res` → `result` from defaults are disabled),
 - adds a custom `cmd` → `command` replacement,

@@ -1,8 +1,13 @@
 # Prefer `.at()` method for index access and `String#charAt()`
 
-Prefer [`Array#at()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/at), [`String#at()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/at), and `{TypedArray,NodeList,CSSRuleList,…}#at()` for index access and `String#charAt()`.
+💼 This rule is enabled in the ✅ `recommended` [config](https://github.com/sindresorhus/eslint-plugin-unicorn#preset-configs).
 
-This rule is fixable.
+🔧💡 This rule is automatically fixable by the [`--fix` CLI option](https://eslint.org/docs/latest/user-guide/command-line-interface#--fix) and manually fixable by [editor suggestions](https://eslint.org/docs/developer-guide/working-with-rules#providing-suggestions).
+
+<!-- end auto-generated rule header -->
+<!-- Do not manually modify this header. Run: `npm run fix:eslint-docs` -->
+
+Prefer [`Array#at()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/at), [`String#at()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/at), and `{TypedArray,NodeList,CSSRuleList,…}#at()` for index access and `String#charAt()`.
 
 ## Fail
 
@@ -85,7 +90,7 @@ Example:
 // eslint unicorn/prefer-at: ["error", {"checkAllIndexAccess": true}]
 const foo = bar[10]; // Fails, will fix to `bar.at(10)`
 const foo = bar[unknownProperty]; // Passes
-const foo = string.chatAt(unknownIndex); // Fails
+const foo = string.charAt(unknownIndex); // Fails
 ```
 
 ### getLastElementFunctions

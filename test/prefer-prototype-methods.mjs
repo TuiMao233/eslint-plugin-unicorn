@@ -32,6 +32,7 @@ test.snapshot({
 		'foo.bar.bind(foo)',
 		'foo.bar.bind(bar)',
 		'foo[{}].call(bar)',
+		'Object.hasOwn(bar)',
 	],
 	invalid: [
 		'const foo = [].push.apply(bar, elements);',
@@ -50,39 +51,12 @@ test.snapshot({
 		'const foo = ({}.toString.call)(bar);',
 		'function foo(){return[].slice.call(bar);}',
 		'function foo(){return{}.toString.call(bar)}',
-	],
-});
-
-test.babel({
-	testerOptions: {
-		env: {es2021: true},
-	},
-	valid: [],
-	invalid: [
-		{
-			code: 'Reflect.apply({}[Symbol()], baz, [])',
-			output: 'Reflect.apply(Object.prototype[Symbol()], baz, [])',
-			errors: [{message: 'Prefer using method from `Object.prototype`.'}],
-		},
-		{
-			code: 'Reflect.apply({}[Symbol("symbol description")], baz, [])',
-			output: 'Reflect.apply(Object.prototype[Symbol("symbol description")], baz, [])',
-			errors: [{message: 'Prefer using method from `Object.prototype`.'}],
-		},
-		{
-			code: 'Reflect.apply([][Symbol()], baz, [])',
-			output: 'Reflect.apply(Array.prototype[Symbol()], baz, [])',
-			errors: [{message: 'Prefer using method from `Array.prototype`.'}],
-		},
-		{
-			code: 'Reflect.apply({}[Symbol("symbol description")], baz, [])',
-			output: 'Reflect.apply(Object.prototype[Symbol("symbol description")], baz, [])',
-			errors: [{message: 'Prefer using method from `Object.prototype`.'}],
-		},
-		{
-			code: '[][Symbol.iterator].call(foo)',
-			output: 'Array.prototype[Symbol.iterator].call(foo)',
-			errors: [{message: 'Prefer using `Array.prototype.Symbol(Symbol.iterator)`.'}],
-		},
+		'Reflect.apply({}[Symbol()], baz, [])',
+		'Reflect.apply({}[Symbol("symbol description")], baz, [])',
+		'Reflect.apply([][Symbol()], baz, [])',
+		'Reflect.apply({}[Symbol("symbol description")], baz, [])',
+		'[][Symbol.iterator].call(foo)',
+		'const foo = [].at.call(bar)',
+		'const foo = [].findLast.call(bar)',
 	],
 });

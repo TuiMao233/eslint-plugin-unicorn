@@ -1,5 +1,5 @@
 'use strict';
-const {findVariable} = require('eslint-utils');
+const {findVariable} = require('@eslint-community/eslint-utils');
 
 const MESSAGE_ID = 'preferDefaultParameters';
 const MESSAGE_ID_SUGGEST = 'preferDefaultParametersSuggest';
@@ -125,6 +125,7 @@ const fixDefaultExpression = (fixer, sourceCode, node) => {
 	return fixer.remove(node);
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const sourceCode = context.getSourceCode();
 	const functionStack = [];
@@ -147,11 +148,11 @@ const create = context => {
 			return;
 		}
 
-		const variable = findVariable(context.getScope(), secondId);
+		const variable = findVariable(sourceCode.getScope(node), secondId);
 
 		// This was reported https://github.com/sindresorhus/eslint-plugin-unicorn/issues/1122
 		// But can't reproduce, just ignore this case
-		/* istanbul ignore next */
+		/* c8 ignore next 3 */
 		if (!variable) {
 			return;
 		}
@@ -189,18 +190,18 @@ const create = context => {
 	};
 
 	return {
-		':function': node => {
+		':function'(node) {
 			functionStack.push(node);
 		},
-		':function:exit': () => {
+		':function:exit'() {
 			functionStack.pop();
 		},
-		[assignmentSelector]: node => {
+		[assignmentSelector](node) {
 			const {left, right} = node.expression;
 
 			return checkExpression(node, left, right, true);
 		},
-		[declarationSelector]: node => {
+		[declarationSelector](node) {
 			const {id, init} = node.declarations[0];
 
 			return checkExpression(node, id, init, false);
@@ -208,6 +209,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -216,10 +218,10 @@ module.exports = {
 			description: 'Prefer default parameters over reassignment.',
 		},
 		fixable: 'code',
+		hasSuggestions: true,
 		messages: {
 			[MESSAGE_ID]: 'Prefer default parameters over reassignment.',
 			[MESSAGE_ID_SUGGEST]: 'Replace reassignment with default parameter.',
 		},
-		hasSuggestions: true,
 	},
 };

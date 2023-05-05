@@ -1,5 +1,5 @@
 'use strict';
-const {hasSideEffect} = require('eslint-utils');
+const {hasSideEffect} = require('@eslint-community/eslint-utils');
 const isSameReference = require('./utils/is-same-reference.js');
 const getIndentString = require('./utils/get-indent-string.js');
 
@@ -162,21 +162,24 @@ function getBlockStatementLastNode(blockStatement) {
 function shouldInsertBreakStatement(node) {
 	switch (node.type) {
 		case 'ReturnStatement':
-		case 'ThrowStatement':
+		case 'ThrowStatement': {
 			return false;
+		}
 
-		case 'IfStatement':
+		case 'IfStatement': {
 			return !node.alternate
 				|| shouldInsertBreakStatement(node.consequent)
 				|| shouldInsertBreakStatement(node.alternate);
+		}
 
 		case 'BlockStatement': {
 			const lastNode = getBlockStatementLastNode(node);
 			return !lastNode || shouldInsertBreakStatement(lastNode);
 		}
 
-		default:
+		default: {
 			return true;
+		}
 	}
 }
 
@@ -205,9 +208,11 @@ function fix({discriminant, ifStatements}, sourceCode, options) {
 			*/
 		} else {
 			switch (options.emptyDefaultCase) {
-				case 'no-default-comment':
+				case 'no-default-comment': {
 					yield fixer.insertTextAfter(firstStatement, `\n${indent}// No default`);
 					break;
+				}
+
 				case 'do-nothing-comment': {
 					yield fixer.insertTextAfter(firstStatement, `\n${indent}default:\n${indent}// Do nothing`);
 					break;
@@ -243,6 +248,7 @@ function fix({discriminant, ifStatements}, sourceCode, options) {
 	};
 }
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const options = {
 		minimumCases: 3,
@@ -302,6 +308,7 @@ const create = context => {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			minimumCases: {
 				type: 'integer',
@@ -317,10 +324,10 @@ const schema = [
 				default: 'no-default-comment',
 			},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

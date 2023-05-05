@@ -1,7 +1,7 @@
 'use strict';
 const isMethodNamed = require('./utils/is-method-named.js');
-const isLiteralValue = require('./utils/is-literal-value.js');
 const simpleArraySearchRule = require('./shared/simple-array-search-rule.js');
+const {isLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID = 'prefer-includes';
 const messages = {
@@ -11,7 +11,7 @@ const messages = {
 const ignoredVariables = new Set(['_', 'lodash', 'underscore']);
 const isIgnoredTarget = node => node.type === 'Identifier' && ignoredVariables.has(node.name);
 const isNegativeOne = node => node.type === 'UnaryExpression' && node.operator === '-' && node.argument && node.argument.type === 'Literal' && node.argument.value === 1;
-const isLiteralZero = node => isLiteralValue(node, 0);
+const isLiteralZero = node => isLiteral(node, 0);
 const isNegativeResult = node => ['===', '==', '<'].includes(node.operator);
 
 const getProblem = (context, node, target, argumentsNodes) => {
@@ -30,7 +30,7 @@ const getProblem = (context, node, target, argumentsNodes) => {
 	return {
 		node: memberExpressionNode.property,
 		messageId: MESSAGE_ID,
-		fix: fixer => {
+		fix(fixer) {
 			const replacement = `${isNegativeResult(node) ? '!' : ''}${targetSource}.includes(${argumentsSource.join(', ')})`;
 			return fixer.replaceText(node, replacement);
 		},
@@ -42,8 +42,9 @@ const includesOverSomeRule = simpleArraySearchRule({
 	replacement: 'includes',
 });
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
-	BinaryExpression: node => {
+	BinaryExpression(node) {
 		const {left, right, operator} = node;
 
 		if (!isMethodNamed(left, 'indexOf')) {
@@ -78,6 +79,7 @@ const create = context => ({
 	...includesOverSomeRule.createListeners(context),
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -86,10 +88,10 @@ module.exports = {
 			description: 'Prefer `.includes()` over `.indexOf()` and `Array#some()` when checking for existence or non-existence.',
 		},
 		fixable: 'code',
+		hasSuggestions: true,
 		messages: {
 			...messages,
 			...includesOverSomeRule.messages,
 		},
-		hasSuggestions: true,
 	},
 };

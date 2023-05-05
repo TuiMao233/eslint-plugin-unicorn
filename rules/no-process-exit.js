@@ -29,6 +29,7 @@ const processExitCallSelector = methodCallSelector({
 	method: 'exit',
 });
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const startsWithHashBang = context.getSourceCode().lines[0].indexOf('#!') === 0;
 
@@ -44,20 +45,20 @@ const create = context => {
 
 	return {
 		// Check `worker_threads` require / import
-		[importWorkerThreadsSelector]: () => {
+		[importWorkerThreadsSelector]() {
 			requiredWorkerThreadsModule = true;
 		},
 		// Check `process.on` / `process.once` call
-		[processOnOrOnceCallSelector]: node => {
+		[processOnOrOnceCallSelector](node) {
 			processEventHandler = node;
 		},
 		// Check `process.exit` call
-		[processExitCallSelector]: node => {
+		[processExitCallSelector](node) {
 			if (!processEventHandler) {
 				problemNodes.push(node);
 			}
 		},
-		'CallExpression:exit': node => {
+		'CallExpression:exit'(node) {
 			if (node === processEventHandler) {
 				processEventHandler = undefined;
 			}
@@ -75,6 +76,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

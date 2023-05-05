@@ -1,7 +1,6 @@
 'use strict';
 const {defaultsDeep} = require('lodash');
-const {getStringIfConstant} = require('eslint-utils');
-const eslintTemplateVisitor = require('eslint-template-visitor');
+const {getStringIfConstant} = require('@eslint-community/eslint-utils');
 const {callExpressionSelector} = require('./selectors/index.js');
 
 const MESSAGE_ID = 'importStyle';
@@ -100,7 +99,7 @@ const getActualAssignmentTargetImportStyles = assignmentTarget => {
 	// Next line is not test-coverable until unforceable changes to the language
 	// like an addition of new AST node types usable in `const __HERE__ = foo;`.
 	// An exotic custom parser or a bug in one could cover it too.
-	/* istanbul ignore next */
+	/* c8 ignore next */
 	return [];
 };
 
@@ -131,25 +130,20 @@ const defaultStyles = {
 	},
 };
 
-const templates = eslintTemplateVisitor({
-	parserOptions: {
-		sourceType: 'module',
-		ecmaVersion: 2018,
-	},
-});
+const assignedDynamicImportSelector = [
+	'VariableDeclarator',
+	'[init.type="AwaitExpression"]',
+	'[init.argument.type="ImportExpression"]',
+].join('');
 
-const variableDeclarationVariable = templates.variableDeclarationVariable();
-const assignmentTargetVariable = templates.variable();
-const moduleNameVariable = templates.variable();
+const assignedRequireSelector = [
+	'VariableDeclarator',
+	'[init.type="CallExpression"]',
+	'[init.callee.type="Identifier"]',
+	'[init.callee.name="require"]',
+].join('');
 
-const assignedDynamicImportTemplate = templates.template`async () => {
-	${variableDeclarationVariable} ${assignmentTargetVariable} = await import(${moduleNameVariable});
-}`.narrow('BlockStatement > :has(AwaitExpression)');
-
-const assignedRequireTemplate = templates.template`
-	${variableDeclarationVariable} ${assignmentTargetVariable} = require(${moduleNameVariable});
-`;
-
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	let [
 		{
@@ -172,6 +166,8 @@ const create = context => {
 				[moduleName, new Set(Object.entries(styles).filter(([, isAllowed]) => isAllowed).map(([style]) => style))],
 		),
 	);
+
+	const sourceCode = context.getSourceCode();
 
 	const report = (node, moduleName, actualImportStyles, allowedImportStyles, isRequire = false) => {
 		if (!allowedImportStyles || allowedImportStyles.size === 0) {
@@ -212,7 +208,7 @@ const create = context => {
 			...visitor,
 
 			ImportDeclaration(node) {
-				const moduleName = getStringIfConstant(node.source, context.getScope());
+				const moduleName = getStringIfConstant(node.source, sourceCode.getScope(node.source));
 
 				const allowedImportStyles = styles.get(moduleName);
 				const actualImportStyles = getActualImportDeclarationStyles(node);
@@ -227,17 +223,17 @@ const create = context => {
 			...visitor,
 
 			'ExpressionStatement > ImportExpression'(node) {
-				const moduleName = getStringIfConstant(node.source, context.getScope());
+				const moduleName = getStringIfConstant(node.source, sourceCode.getScope(node.source));
 				const allowedImportStyles = styles.get(moduleName);
 				const actualImportStyles = ['unassigned'];
 
 				report(node, moduleName, actualImportStyles, allowedImportStyles);
 			},
 
-			[assignedDynamicImportTemplate](node) {
-				const assignmentTargetNode = assignedDynamicImportTemplate.context.getMatch(assignmentTargetVariable);
-				const moduleNameNode = assignedDynamicImportTemplate.context.getMatch(moduleNameVariable);
-				const moduleName = getStringIfConstant(moduleNameNode, context.getScope());
+			[assignedDynamicImportSelector](node) {
+				const assignmentTargetNode = node.id;
+				const moduleNameNode = node.init.argument.source;
+				const moduleName = getStringIfConstant(moduleNameNode, sourceCode.getScope(moduleNameNode));
 
 				if (!moduleName) {
 					return;
@@ -256,7 +252,7 @@ const create = context => {
 			...visitor,
 
 			ExportAllDeclaration(node) {
-				const moduleName = getStringIfConstant(node.source, context.getScope());
+				const moduleName = getStringIfConstant(node.source, sourceCode.getScope(node.source));
 
 				const allowedImportStyles = styles.get(moduleName);
 				const actualImportStyles = ['namespace'];
@@ -265,7 +261,7 @@ const create = context => {
 			},
 
 			ExportNamedDeclaration(node) {
-				const moduleName = getStringIfConstant(node.source, context.getScope());
+				const moduleName = getStringIfConstant(node.source, sourceCode.getScope(node.source));
 
 				const allowedImportStyles = styles.get(moduleName);
 				const actualImportStyles = getActualExportDeclarationStyles(node);
@@ -280,17 +276,17 @@ const create = context => {
 			...visitor,
 
 			[`ExpressionStatement > ${callExpressionSelector({name: 'require', argumentsLength: 1})}.expression`](node) {
-				const moduleName = getStringIfConstant(node.arguments[0], context.getScope());
+				const moduleName = getStringIfConstant(node.arguments[0], sourceCode.getScope(node.arguments[0]));
 				const allowedImportStyles = styles.get(moduleName);
 				const actualImportStyles = ['unassigned'];
 
 				report(node, moduleName, actualImportStyles, allowedImportStyles, true);
 			},
 
-			[assignedRequireTemplate](node) {
-				const assignmentTargetNode = assignedRequireTemplate.context.getMatch(assignmentTargetVariable);
-				const moduleNameNode = assignedRequireTemplate.context.getMatch(moduleNameVariable);
-				const moduleName = getStringIfConstant(moduleNameNode, context.getScope());
+			[assignedRequireSelector](node) {
+				const assignmentTargetNode = node.id;
+				const moduleNameNode = node.init.arguments[0];
+				const moduleName = getStringIfConstant(moduleNameNode, sourceCode.getScope(moduleNameNode));
 
 				if (!moduleName) {
 					return;
@@ -304,62 +300,67 @@ const create = context => {
 		};
 	}
 
-	return templates.visitor(visitor);
+	return visitor;
 };
 
-const schema = [
-	{
-		type: 'object',
-		properties: {
-			checkImport: {
-				type: 'boolean',
-			},
-			checkDynamicImport: {
-				type: 'boolean',
-			},
-			checkExportFrom: {
-				type: 'boolean',
-			},
-			checkRequire: {
-				type: 'boolean',
-			},
-			extendDefaultStyles: {
-				type: 'boolean',
-			},
-			styles: {
-				$ref: '#/items/0/definitions/moduleStyles',
-			},
-		},
-		additionalProperties: false,
-		definitions: {
-			moduleStyles: {
-				type: 'object',
-				additionalProperties: {
-					$ref: '#/items/0/definitions/styles',
-				},
-			},
-			styles: {
-				anyOf: [
-					{
-						enum: [
-							false,
-						],
-					},
-					{
-						$ref: '#/items/0/definitions/booleanObject',
-					},
-				],
-			},
-			booleanObject: {
-				type: 'object',
-				additionalProperties: {
+const schema = {
+	type: 'array',
+	additionalItems: false,
+	items: [
+		{
+			type: 'object',
+			additionalProperties: false,
+			properties: {
+				checkImport: {
 					type: 'boolean',
 				},
+				checkDynamicImport: {
+					type: 'boolean',
+				},
+				checkExportFrom: {
+					type: 'boolean',
+				},
+				checkRequire: {
+					type: 'boolean',
+				},
+				extendDefaultStyles: {
+					type: 'boolean',
+				},
+				styles: {
+					$ref: '#/definitions/moduleStyles',
+				},
+			},
+		},
+	],
+	definitions: {
+		moduleStyles: {
+			type: 'object',
+			additionalProperties: {
+				$ref: '#/definitions/styles',
+			},
+		},
+		styles: {
+			anyOf: [
+				{
+					enum: [
+						false,
+					],
+				},
+				{
+					$ref: '#/definitions/booleanObject',
+				},
+			],
+		},
+		booleanObject: {
+			type: 'object',
+			additionalProperties: {
+				type: 'boolean',
 			},
 		},
 	},
-];
+};
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

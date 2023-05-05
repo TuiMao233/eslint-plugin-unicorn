@@ -3,6 +3,7 @@ const packageJson = require('../../package.json');
 
 const repoUrl = 'https://github.com/sindresorhus/eslint-plugin-unicorn';
 
+/** @returns {{ [ruleName: string]: import('eslint').Rule.RuleModule }} */
 function createDeprecatedRules(data) {
 	return Object.fromEntries(
 		Object.entries(data).map(([ruleId, replacedBy = []]) => [
@@ -15,7 +16,6 @@ function createDeprecatedRules(data) {
 					},
 					deprecated: true,
 					replacedBy: Array.isArray(replacedBy) ? replacedBy : [replacedBy],
-					schema: [],
 				},
 			},
 		]),

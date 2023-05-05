@@ -23,7 +23,7 @@ const replaceChildOrInsertBeforeSelector = [
 	'[callee.object.type="Identifier"]',
 ].join('');
 
-const forbiddenMethods = new Map([
+const disallowedMethods = new Map([
 	['replaceChild', 'replaceWith'],
 	['insertBefore', 'before'],
 ]);
@@ -32,7 +32,7 @@ const checkForReplaceChildOrInsertBefore = (context, node) => {
 	const method = node.callee.property.name;
 	const parentNode = node.callee.object.name;
 	const [newChildNode, oldChildNode] = node.arguments.map(({name}) => name);
-	const preferredMethod = forbiddenMethods.get(method);
+	const preferredMethod = disallowedMethods.get(method);
 
 	const fix = isValueNotUsable(node)
 		? fixer => fixer.replaceText(
@@ -111,6 +111,7 @@ const checkForInsertAdjacentTextOrInsertAdjacentElement = (context, node) => {
 	};
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
 	[replaceChildOrInsertBeforeSelector](node) {
 		return checkForReplaceChildOrInsertBefore(context, node);
@@ -120,6 +121,7 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

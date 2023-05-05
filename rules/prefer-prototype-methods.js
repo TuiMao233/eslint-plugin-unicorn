@@ -1,11 +1,11 @@
 'use strict';
+const {getPropertyName} = require('@eslint-community/eslint-utils');
 const {
 	methodCallSelector,
 	emptyObjectSelector,
 	emptyArraySelector,
 	matches,
 } = require('./selectors/index.js');
-const getPropertyName = require('./utils/get-property-name.js');
 const {fixSpaceAroundKeyword} = require('./fix/index.js');
 
 const messages = {
@@ -41,23 +41,21 @@ function create(context) {
 	return {
 		[selector](node) {
 			const constructorName = node.object.type === 'ArrayExpression' ? 'Array' : 'Object';
-			const methodName = getPropertyName(node, context.getScope());
+			const sourceCode = context.getSourceCode();
+			const methodName = getPropertyName(node, sourceCode.getScope(node));
 
 			return {
 				node,
 				messageId: methodName ? 'known-method' : 'unknown-method',
-				data: {constructorName, methodName: String(methodName)},
+				data: {constructorName, methodName},
 				* fix(fixer) {
 					yield fixer.replaceText(node.object, `${constructorName}.prototype`);
 
 					if (
-						node.object
-						&& (
-							node.object.type === 'ArrayExpression'
-							|| node.object.type === 'ObjectExpression'
-						)
+						node.object.type === 'ArrayExpression'
+						|| node.object.type === 'ObjectExpression'
 					) {
-						yield * fixSpaceAroundKeyword(fixer, node.parent.parent, context.getSourceCode());
+						yield * fixSpaceAroundKeyword(fixer, node.parent.parent, sourceCode);
 					}
 				},
 			};
@@ -65,6 +63,7 @@ function create(context) {
 	};
 }
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

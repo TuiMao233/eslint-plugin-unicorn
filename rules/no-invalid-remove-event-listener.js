@@ -1,5 +1,5 @@
 'use strict';
-const {getFunctionHeadLocation} = require('eslint-utils');
+const {getFunctionHeadLocation} = require('@eslint-community/eslint-utils');
 const getDocumentationUrl = require('./utils/get-documentation-url.js');
 const {methodCallSelector, matches} = require('./selectors/index.js');
 
@@ -23,7 +23,7 @@ const removeEventListenerSelector = [
 
 /** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
-	[removeEventListenerSelector]: node => {
+	[removeEventListenerSelector](node) {
 		const listener = node.arguments[1];
 		if (['ArrowFunctionExpression', 'FunctionExpression'].includes(listener.type)) {
 			return {
@@ -40,6 +40,7 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -48,7 +49,6 @@ module.exports = {
 			description: 'Prevent calling `EventTarget#removeEventListener()` with the result of an expression.',
 			url: getDocumentationUrl(__filename),
 		},
-		schema: [],
 		messages,
 	},
 };

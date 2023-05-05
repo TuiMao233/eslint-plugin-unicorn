@@ -1,23 +1,33 @@
 'use strict';
-const {isCommaToken} = require('eslint-utils');
+const {isCommaToken} = require('@eslint-community/eslint-utils');
 const {
 	matches,
 	newExpressionSelector,
 	methodCallSelector,
 } = require('./selectors/index.js');
-const {getParentheses} = require('./utils/parentheses.js');
 const typedArray = require('./shared/typed-array.js');
-const {fixSpaceAroundKeyword} = require('./fix/index.js');
+const {
+	removeParentheses,
+	fixSpaceAroundKeyword,
+	addParenthesizesToReturnOrThrowExpression,
+} = require('./fix/index.js');
+const isOnSameLine = require('./utils/is-on-same-line.js');
+const {
+	isParenthesized,
+} = require('./utils/parentheses.js');
+const {isNewExpression} = require('./ast/index.js');
 
 const SPREAD_IN_LIST = 'spread-in-list';
 const ITERABLE_TO_ARRAY = 'iterable-to-array';
 const ITERABLE_TO_ARRAY_IN_FOR_OF = 'iterable-to-array-in-for-of';
 const ITERABLE_TO_ARRAY_IN_YIELD_STAR = 'iterable-to-array-in-yield-star';
+const CLONE_ARRAY = 'clone-array';
 const messages = {
 	[SPREAD_IN_LIST]: 'Spread an {{argumentType}} literal in {{parentDescription}} is unnecessary.',
 	[ITERABLE_TO_ARRAY]: '`{{parentDescription}}` accepts iterable as argument, it\'s unnecessary to convert to an array.',
 	[ITERABLE_TO_ARRAY_IN_FOR_OF]: '`for…of` can iterate over iterable, it\'s unnecessary to convert to an array.',
 	[ITERABLE_TO_ARRAY_IN_YIELD_STAR]: '`yield*` can delegate iterable, it\'s unnecessary to convert to an array.',
+	[CLONE_ARRAY]: 'Unnecessarily cloning an array.',
 };
 
 const uselessSpreadInListSelector = matches([
@@ -27,7 +37,7 @@ const uselessSpreadInListSelector = matches([
 	'NewExpression > SpreadElement.arguments > ArrayExpression.argument',
 ]);
 
-const iterableToArraySelector = [
+const singleArraySpreadSelector = [
 	'ArrayExpression',
 	'[elements.length=1]',
 	'[elements.0.type="SpreadElement"]',
@@ -50,11 +60,50 @@ const uselessIterableToArraySelector = matches([
 			methodCallSelector({object: 'Object', method: 'fromEntries', argumentsLength: 1}),
 		]),
 		' > ',
-		`${iterableToArraySelector}.arguments:first-child`,
+		`${singleArraySpreadSelector}.arguments:first-child`,
 	].join(''),
-	`ForOfStatement > ${iterableToArraySelector}.right`,
-	`YieldExpression[delegate=true] > ${iterableToArraySelector}.argument`,
+	`ForOfStatement > ${singleArraySpreadSelector}.right`,
+	`YieldExpression[delegate=true] > ${singleArraySpreadSelector}.argument`,
 ]);
+
+const uselessArrayCloneSelector = [
+	`${singleArraySpreadSelector} > .elements:first-child > .argument`,
+	matches([
+		// Array methods returns a new array
+		methodCallSelector([
+			'concat',
+			'copyWithin',
+			'filter',
+			'flat',
+			'flatMap',
+			'map',
+			'slice',
+			'splice',
+			'toReversed',
+			'toSorted',
+			'toSpliced',
+			'with',
+		]),
+		// `String#split()`
+		methodCallSelector('split'),
+		// `Object.keys()` and `Object.values()`
+		methodCallSelector({object: 'Object', methods: ['keys', 'values'], argumentsLength: 1}),
+		// `await Promise.all()` and `await Promise.allSettled`
+		[
+			'AwaitExpression',
+			methodCallSelector({
+				object: 'Promise',
+				methods: ['all', 'allSettled'],
+				argumentsLength: 1,
+				path: 'argument',
+			}),
+		].join(''),
+		// `Array.from()`, `Array.of()`
+		methodCallSelector({object: 'Array', methods: ['from', 'of']}),
+		// `new Array()`
+		newExpressionSelector('Array'),
+	]),
+].join('');
 
 const parentDescriptions = {
 	ArrayExpression: 'array literal',
@@ -82,6 +131,59 @@ function getCommaTokens(arrayExpression, sourceCode) {
 	});
 }
 
+function * unwrapSingleArraySpread(fixer, arrayExpression, sourceCode) {
+	const [
+		openingBracketToken,
+		spreadToken,
+		thirdToken,
+	] = sourceCode.getFirstTokens(arrayExpression, 3);
+
+	// `[...value]`
+	//  ^
+	yield fixer.remove(openingBracketToken);
+
+	// `[...value]`
+	//   ^^^
+	yield fixer.remove(spreadToken);
+
+	const [
+		commaToken,
+		closingBracketToken,
+	] = sourceCode.getLastTokens(arrayExpression, 2);
+
+	// `[...value]`
+	//           ^
+	yield fixer.remove(closingBracketToken);
+
+	// `[...value,]`
+	//           ^
+	if (isCommaToken(commaToken)) {
+		yield fixer.remove(commaToken);
+	}
+
+	/*
+	```js
+	function foo() {
+		return [
+			...value,
+		];
+	}
+	```
+	*/
+	const {parent} = arrayExpression;
+	if (
+		(parent.type === 'ReturnStatement' || parent.type === 'ThrowStatement')
+		&& parent.argument === arrayExpression
+		&& !isOnSameLine(openingBracketToken, thirdToken)
+		&& !isParenthesized(arrayExpression, sourceCode)
+	) {
+		yield * addParenthesizesToReturnOrThrowExpression(fixer, parent, sourceCode);
+		return;
+	}
+
+	yield * fixSpaceAroundKeyword(fixer, arrayExpression, sourceCode);
+}
+
 /** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const sourceCode = context.getSourceCode();
@@ -107,10 +209,7 @@ const create = context => {
 
 					// `[...(( [foo] ))]`
 					//      ^^       ^^
-					const parentheses = getParentheses(spreadObject, sourceCode);
-					for (const parenthesis of parentheses) {
-						yield fixer.remove(parenthesis);
-					}
+					yield * removeParentheses(spreadObject, fixer, sourceCode);
 
 					// `[...[foo]]`
 					//      ^
@@ -142,75 +241,76 @@ const create = context => {
 							continue;
 						}
 
-						// `call([foo, , bar])`
-						//             ^ Replace holes with `undefined`
+						// `call(...[foo, , bar])`
+						//               ^ Replace holes with `undefined`
 						yield fixer.insertTextBefore(commaToken, 'undefined');
 					}
 				},
 			};
 		},
-		[uselessIterableToArraySelector](array) {
-			const {parent} = array;
+		[uselessIterableToArraySelector](arrayExpression) {
+			const {parent} = arrayExpression;
 			let parentDescription = '';
 			let messageId = ITERABLE_TO_ARRAY;
 			switch (parent.type) {
-				case 'ForOfStatement':
+				case 'ForOfStatement': {
 					messageId = ITERABLE_TO_ARRAY_IN_FOR_OF;
 					break;
-				case 'YieldExpression':
+				}
+
+				case 'YieldExpression': {
 					messageId = ITERABLE_TO_ARRAY_IN_YIELD_STAR;
 					break;
-				case 'NewExpression':
+				}
+
+				case 'NewExpression': {
 					parentDescription = `new ${parent.callee.name}(…)`;
 					break;
-				case 'CallExpression':
+				}
+
+				case 'CallExpression': {
 					parentDescription = `${parent.callee.object.name}.${parent.callee.property.name}(…)`;
 					break;
+				}
 				// No default
 			}
 
 			return {
-				node: array,
+				node: arrayExpression,
 				messageId,
 				data: {parentDescription},
-				* fix(fixer) {
-					if (parent.type === 'ForOfStatement') {
-						yield * fixSpaceAroundKeyword(fixer, array, sourceCode);
-					}
-
-					const [
-						openingBracketToken,
-						spreadToken,
-					] = sourceCode.getFirstTokens(array, 2);
-
-					// `[...iterable]`
-					//  ^
-					yield fixer.remove(openingBracketToken);
-
-					// `[...iterable]`
-					//   ^^^
-					yield fixer.remove(spreadToken);
-
-					const [
-						commaToken,
-						closingBracketToken,
-					] = sourceCode.getLastTokens(array, 2);
-
-					// `[...iterable]`
-					//              ^
-					yield fixer.remove(closingBracketToken);
-
-					// `[...iterable,]`
-					//              ^
-					if (isCommaToken(commaToken)) {
-						yield fixer.remove(commaToken);
-					}
-				},
+				fix: fixer => unwrapSingleArraySpread(fixer, arrayExpression, sourceCode),
 			};
+		},
+		[uselessArrayCloneSelector](node) {
+			const arrayExpression = node.parent.parent;
+			const problem = {
+				node: arrayExpression,
+				messageId: CLONE_ARRAY,
+			};
+
+			if (
+				// `[...new Array(1)]` -> `new Array(1)` is not safe to fix since there are holes
+				isNewExpression(node, {name: 'Array'})
+				// `[...foo.slice(1)]` -> `foo.slice(1)` is not safe to fix since `foo` can be a string
+				|| (
+					node.type === 'CallExpression'
+					&& node.callee.type === 'MemberExpression'
+					&& node.callee.property.type === 'Identifier'
+					&& node.callee.property.name === 'slice'
+				)
+			) {
+				return problem;
+			}
+
+			return Object.assign(problem, {
+				fix: fixer => unwrapSingleArraySpread(fixer, arrayExpression, sourceCode),
+			});
 		},
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

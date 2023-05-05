@@ -1,9 +1,8 @@
 'use strict';
-const {isParenthesized, findVariable} = require('eslint-utils');
+const {isParenthesized, findVariable} = require('@eslint-community/eslint-utils');
 const {
 	not,
 	methodCallSelector,
-	notLeftHandSideSelector,
 } = require('./selectors/index.js');
 const getVariableIdentifiers = require('./utils/get-variable-identifiers.js');
 const avoidCapture = require('./utils/avoid-capture.js');
@@ -15,9 +14,12 @@ const {
 	removeMethodCall,
 	renameVariable,
 } = require('./fix/index.js');
+const isLeftHandSide = require('./utils/is-left-hand-side.js');
 
 const ERROR_ZERO_INDEX = 'error-zero-index';
 const ERROR_SHIFT = 'error-shift';
+const ERROR_POP = 'error-pop';
+const ERROR_AT_MINUS_ONE = 'error-at-minus-one';
 const ERROR_DESTRUCTURING_DECLARATION = 'error-destructuring-declaration';
 const ERROR_DESTRUCTURING_ASSIGNMENT = 'error-destructuring-assignment';
 const ERROR_DECLARATION = 'error-variable';
@@ -27,6 +29,8 @@ const messages = {
 	[ERROR_DECLARATION]: 'Prefer `.find(…)` over `.filter(…)`.',
 	[ERROR_ZERO_INDEX]: 'Prefer `.find(…)` over `.filter(…)[0]`.',
 	[ERROR_SHIFT]: 'Prefer `.find(…)` over `.filter(…).shift()`.',
+	[ERROR_POP]: 'Prefer `.findLast(…)` over `.filter(…).pop()`.',
+	[ERROR_AT_MINUS_ONE]: 'Prefer `.findLast(…)` over `.filter(…).at(-1)`.',
 	[ERROR_DESTRUCTURING_DECLARATION]: 'Prefer `.find(…)` over destructuring `.filter(…)`.',
 	// Same message as `ERROR_DESTRUCTURING_DECLARATION`, but different case
 	[ERROR_DESTRUCTURING_ASSIGNMENT]: 'Prefer `.find(…)` over destructuring `.filter(…)`.',
@@ -58,7 +62,6 @@ const zeroIndexSelector = [
 	'[computed!=false]',
 	'[property.type="Literal"]',
 	'[property.raw="0"]',
-	notLeftHandSideSelector(),
 	methodCallSelector({
 		...filterMethodSelectorOptions,
 		path: 'object',
@@ -70,6 +73,33 @@ const shiftSelector = [
 		method: 'shift',
 		argumentsLength: 0,
 	}),
+	methodCallSelector({
+		...filterMethodSelectorOptions,
+		path: 'callee.object',
+	}),
+].join('');
+
+const popSelector = [
+	methodCallSelector({
+		method: 'pop',
+		argumentsLength: 0,
+	}),
+	methodCallSelector({
+		...filterMethodSelectorOptions,
+		path: 'callee.object',
+	}),
+].join('');
+
+const atMinusOneSelector = [
+	methodCallSelector({
+		method: 'at',
+		argumentsLength: 1,
+	}),
+	'[arguments.0.type="UnaryExpression"]',
+	'[arguments.0.operator="-"]',
+	'[arguments.0.prefix]',
+	'[arguments.0.argument.type="Literal"]',
+	'[arguments.0.argument.raw=1]',
 	methodCallSelector({
 		...filterMethodSelectorOptions,
 		path: 'callee.object',
@@ -127,14 +157,14 @@ const hasLowerPrecedence = (node, operator) => (
 	))
 	|| node.type === 'ConditionalExpression'
 	// Lower than `assignment`, should already parenthesized
-	/* istanbul ignore next */
+	/* c8 ignore next */
 	|| node.type === 'AssignmentExpression'
 	|| node.type === 'YieldExpression'
 	|| node.type === 'SequenceExpression'
 );
 
 const getDestructuringLeftAndRight = node => {
-	/* istanbul ignore next */
+	/* c8 ignore next 3 */
 	if (!node) {
 		return {};
 	}
@@ -208,11 +238,9 @@ const fixDestructuringAndReplaceFilter = (sourceCode, node) => {
 };
 
 const isAccessingZeroIndex = node =>
-	node.parent
-	&& node.parent.type === 'MemberExpression'
+	node.parent.type === 'MemberExpression'
 	&& node.parent.computed === true
 	&& node.parent.object === node
-	&& node.parent.property
 	&& node.parent.property.type === 'Literal'
 	&& node.parent.property.raw === '0';
 
@@ -222,16 +250,26 @@ const isDestructuringFirstElement = node => {
 		&& right
 		&& right === node
 		&& left.type === 'ArrayPattern'
-		&& left.elements
 		&& left.elements.length === 1
 		&& left.elements[0].type !== 'RestElement';
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const sourceCode = context.getSourceCode();
+	const {
+		checkFromLast,
+	} = {
+		checkFromLast: false,
+		...context.options[0],
+	};
 
-	return {
+	const listeners = {
 		[zeroIndexSelector](node) {
+			if (isLeftHandSide(node)) {
+				return;
+			}
+
 			return {
 				node: node.object.callee.property,
 				messageId: ERROR_ZERO_INDEX,
@@ -266,7 +304,7 @@ const create = context => {
 			};
 		},
 		[filterVariableSelector](node) {
-			const scope = context.getScope();
+			const scope = sourceCode.getScope(node);
 			const variable = findVariable(scope, node.id);
 			const identifiers = getVariableIdentifiers(variable).filter(identifier => identifier !== node.id);
 
@@ -319,17 +357,60 @@ const create = context => {
 			return problem;
 		},
 	};
+
+	if (!checkFromLast) {
+		return listeners;
+	}
+
+	return Object.assign(listeners, {
+		[popSelector](node) {
+			return {
+				node: node.callee.object.callee.property,
+				messageId: ERROR_POP,
+				fix: fixer => [
+					fixer.replaceText(node.callee.object.callee.property, 'findLast'),
+					...removeMethodCall(fixer, node, sourceCode),
+				],
+			};
+		},
+		[atMinusOneSelector](node) {
+			return {
+				node: node.callee.object.callee.property,
+				messageId: ERROR_AT_MINUS_ONE,
+				fix: fixer => [
+					fixer.replaceText(node.callee.object.callee.property, 'findLast'),
+					...removeMethodCall(fixer, node, sourceCode),
+				],
+			};
+		},
+	});
 };
 
+const schema = [
+	{
+		type: 'object',
+		additionalProperties: false,
+		properties: {
+			checkFromLast: {
+				type: 'boolean',
+				// TODO: Change default value to `true`, or remove the option when targeting Node.js 18.
+				default: false,
+			},
+		},
+	},
+];
+
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
 		type: 'suggestion',
 		docs: {
-			description: 'Prefer `.find(…)` over the first element from `.filter(…)`.',
+			description: 'Prefer `.find(…)` and `.findLast(…)` over the first or last element from `.filter(…)`.',
 		},
 		fixable: 'code',
-		messages,
 		hasSuggestions: true,
+		schema,
+		messages,
 	},
 };

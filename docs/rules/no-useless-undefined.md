@@ -1,6 +1,15 @@
 # Disallow useless `undefined`
 
-This rule is fixable.
+💼 This rule is enabled in the ✅ `recommended` [config](https://github.com/sindresorhus/eslint-plugin-unicorn#preset-configs).
+
+🔧 This rule is automatically fixable by the [`--fix` CLI option](https://eslint.org/docs/latest/user-guide/command-line-interface#--fix).
+
+<!-- end auto-generated rule header -->
+<!-- Do not manually modify this header. Run: `npm run fix:eslint-docs` -->
+
+`undefined` is the default value for new variables, parameters, return statements, etc… so specifying it doesn't make any difference.
+
+The only case where passing `undefined` is required is due to bad TypeScript types in functions, in which case you can use `checkArguments: false` option.
 
 ## Fail
 
@@ -91,7 +100,7 @@ Type: `object`
 Type: `boolean`\
 Default: `true`
 
-Forbid the use of `undefined` at the end of function call arguments. Pass `checkArguments: false` to disable checking them.
+Disallow the use of `undefined` at the end of function call arguments. Pass `checkArguments: false` to disable checking them.
 
 #### Fail
 

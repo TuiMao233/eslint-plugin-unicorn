@@ -1,6 +1,7 @@
 'use strict';
 const {methodCallSelector} = require('./selectors/index.js');
 const toLocation = require('./utils/to-location.js');
+const {isStringLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID = 'no-console-spaces';
 const messages = {
@@ -27,6 +28,7 @@ const hasLeadingSpace = value => value.length > 1 && value.charAt(0) === ' ' && 
 // Find exactly one trailing space, allow exactly one space
 const hasTrailingSpace = value => value.length > 1 && value.charAt(value.length - 1) === ' ' && value.charAt(value.length - 2) !== ' ';
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const sourceCode = context.getSourceCode();
 	const getProblem = (node, method, position) => {
@@ -49,11 +51,7 @@ const create = context => {
 			const {arguments: messages} = node;
 			const {length} = messages;
 			for (const [index, node] of messages.entries()) {
-				const {type, value} = node;
-				if (
-					!(type === 'Literal' && typeof value === 'string')
-					&& type !== 'TemplateLiteral'
-				) {
+				if (!isStringLiteral(node) && node.type !== 'TemplateLiteral') {
 					continue;
 				}
 
@@ -71,6 +69,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

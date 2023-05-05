@@ -3,20 +3,20 @@ const {methodCallSelector, matches, memberExpressionSelector} = require('./selec
 const {checkVueTemplate} = require('./utils/rule.js');
 const {isBooleanNode} = require('./utils/boolean.js');
 const {getParenthesizedRange} = require('./utils/parentheses.js');
-const isLiteralValue = require('./utils/is-literal-value.js');
 const {removeMemberExpressionProperty} = require('./fix/index.js');
+const {isLiteral, isUndefined} = require('./ast/index.js');
 
 const ERROR_ID_ARRAY_SOME = 'some';
 const SUGGESTION_ID_ARRAY_SOME = 'some-suggestion';
 const ERROR_ID_ARRAY_FILTER = 'filter';
 const messages = {
-	[ERROR_ID_ARRAY_SOME]: 'Prefer `.some(…)` over `.find(…)`.',
-	[SUGGESTION_ID_ARRAY_SOME]: 'Replace `.find(…)` with `.some(…)`.',
+	[ERROR_ID_ARRAY_SOME]: 'Prefer `.some(…)` over `.{{method}}(…)`.',
+	[SUGGESTION_ID_ARRAY_SOME]: 'Replace `.{{method}}(…)` with `.some(…)`.',
 	[ERROR_ID_ARRAY_FILTER]: 'Prefer `.some(…)` over non-zero length check from `.filter(…)`.',
 };
 
-const arrayFindCallSelector = methodCallSelector({
-	method: 'find',
+const arrayFindOrFindLastCallSelector = methodCallSelector({
+	methods: ['find', 'findLast'],
 	minimumArguments: 1,
 	maximumArguments: 2,
 });
@@ -33,8 +33,7 @@ const isCheckingUndefined = node =>
 				|| node.parent.operator === '==='
 				|| node.parent.operator === '!=='
 			)
-			&& node.parent.right.type === 'Identifier'
-			&& node.parent.right.name === 'undefined'
+			&& isUndefined(node.parent.right)
 		)
 		|| (
 			(
@@ -42,7 +41,7 @@ const isCheckingUndefined = node =>
 				|| node.parent.operator === '=='
 			)
 			// eslint-disable-next-line unicorn/no-null
-			&& isLiteralValue(node.parent.right, null)
+			&& isLiteral(node.parent.right, null)
 		)
 	);
 
@@ -58,31 +57,33 @@ const arrayFilterCallSelector = [
 	`${methodCallSelector('filter')}.object`,
 ].join('');
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
-	[arrayFindCallSelector](findCall) {
-		const isCompare = isCheckingUndefined(findCall);
-		if (!isCompare && !isBooleanNode(findCall)) {
+	[arrayFindOrFindLastCallSelector](callExpression) {
+		const isCompare = isCheckingUndefined(callExpression);
+		if (!isCompare && !isBooleanNode(callExpression)) {
 			return;
 		}
 
-		const findProperty = findCall.callee.property;
+		const methodNode = callExpression.callee.property;
 		return {
-			node: findProperty,
+			node: methodNode,
 			messageId: ERROR_ID_ARRAY_SOME,
+			data: {method: methodNode.name},
 			suggest: [
 				{
 					messageId: SUGGESTION_ID_ARRAY_SOME,
 					* fix(fixer) {
-						yield fixer.replaceText(findProperty, 'some');
+						yield fixer.replaceText(methodNode, 'some');
 
 						if (!isCompare) {
 							return;
 						}
 
-						const parenthesizedRange = getParenthesizedRange(findCall, context.getSourceCode());
-						yield fixer.replaceTextRange([parenthesizedRange[1], findCall.parent.range[1]], '');
+						const parenthesizedRange = getParenthesizedRange(callExpression, context.getSourceCode());
+						yield fixer.replaceTextRange([parenthesizedRange[1], callExpression.parent.range[1]], '');
 
-						if (findCall.parent.operator === '!=' || findCall.parent.operator === '!==') {
+						if (callExpression.parent.operator === '!=' || callExpression.parent.operator === '!==') {
 							return;
 						}
 
@@ -127,12 +128,13 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create: checkVueTemplate(create),
 	meta: {
 		type: 'suggestion',
 		docs: {
-			description: 'Prefer `.some(…)` over `.filter(…).length` check and `.find(…)`.',
+			description: 'Prefer `.some(…)` over `.filter(…).length` check and `.{find,findLast}(…)`.',
 		},
 		fixable: 'code',
 		messages,

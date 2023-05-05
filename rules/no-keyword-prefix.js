@@ -1,4 +1,5 @@
 'use strict';
+const isShorthandPropertyAssignmentPatternLeft = require('./utils/is-shorthand-property-assignment-pattern-left.js');
 
 const MESSAGE_ID = 'noKeywordPrefix';
 const messages = {
@@ -51,7 +52,7 @@ function checkObjectPattern(report, node, options) {
 	const {name, parent} = node;
 	const keyword = findKeywordPrefix(name, options);
 
-	/* istanbul ignore next: Can't find a case to cover this line */
+	/* c8 ignore next 3 */
 	if (parent.shorthand && parent.value.left && Boolean(keyword)) {
 		report(node, keyword);
 	}
@@ -62,7 +63,7 @@ function checkObjectPattern(report, node, options) {
 		report(node, keyword);
 	}
 
-	// Prevent checking righthand side of destructured object
+	// Prevent checking right hand side of destructured object
 	if (parent.key === node && parent.value !== node) {
 		return true;
 	}
@@ -101,7 +102,7 @@ const create = context => {
 	}
 
 	return {
-		Identifier: node => {
+		Identifier(node) {
 			const {name, parent} = node;
 			const keyword = findKeywordPrefix(name, options);
 			const effectiveParent = parent.type === 'MemberExpression' ? parent.parent : parent;
@@ -112,7 +113,7 @@ const create = context => {
 				parent.type === 'Property'
 				|| parent.type === 'AssignmentPattern'
 			) {
-				if (parent.parent && parent.parent.type === 'ObjectPattern') {
+				if (parent.parent.type === 'ObjectPattern') {
 					const finished = checkObjectPattern(report, node, options);
 					if (finished) {
 						return;
@@ -130,6 +131,7 @@ const create = context => {
 					Boolean(keyword)
 					&& !ALLOWED_PARENT_TYPES.has(effectiveParent.type)
 					&& !(parent.right === node)
+					&& !isShorthandPropertyAssignmentPatternLeft(node)
 				) {
 					report(node, keyword);
 				}
@@ -143,11 +145,7 @@ const create = context => {
 				].includes(parent.type)
 			) {
 				// Report only if the local imported identifier is invalid
-				if (
-					Boolean(keyword)
-					&& parent.local
-					&& parent.local.name === name
-				) {
+				if (Boolean(keyword) && parent.local?.name === name) {
 					report(node, keyword);
 				}
 
@@ -165,6 +163,7 @@ const create = context => {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			disallowedPrefixes: {
 				type: 'array',
@@ -183,10 +182,10 @@ const schema = [
 				type: 'boolean',
 			},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

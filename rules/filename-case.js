@@ -1,5 +1,5 @@
 'use strict';
-const path = require('path');
+const path = require('node:path');
 const {camelCase, kebabCase, snakeCase, upperFirst} = require('lodash');
 const cartesianProductSamples = require('./utils/cartesian-product-samples.js');
 
@@ -14,7 +14,7 @@ const pascalCase = string => upperFirst(camelCase(string));
 const numberRegex = /\d+/;
 const PLACEHOLDER = '\uFFFF\uFFFF\uFFFF';
 const PLACEHOLDER_REGEX = new RegExp(PLACEHOLDER, 'i');
-const isIgnoredChar = char => !/^[a-z\d-_$]$/i.test(char);
+const isIgnoredChar = char => !/^[a-z\d-_]$/i.test(char);
 const ignoredByDefault = new Set(['index.js', 'index.mjs', 'index.cjs', 'index.ts', 'index.tsx', 'index.vue']);
 const isLowerCase = string => string === string.toLowerCase();
 
@@ -107,7 +107,7 @@ function splitFilename(filename) {
 	for (const char of tailing) {
 		const isIgnored = isIgnoredChar(char);
 
-		if (lastWord && lastWord.ignored === isIgnored) {
+		if (lastWord?.ignored === isIgnored) {
 			lastWord.word += char;
 		} else {
 			lastWord = {
@@ -130,18 +130,9 @@ Turns `[a, b, c]` into `a, b, or c`.
 @param {string[]} words
 @returns {string}
 */
-function englishishJoinWords(words) {
-	if (words.length === 1) {
-		return words[0];
-	}
+const englishishJoinWords = words => new Intl.ListFormat('en-US', {type: 'disjunction'}).format(words);
 
-	if (words.length === 2) {
-		return `${words[0]} or ${words[1]}`;
-	}
-
-	return `${words.slice(0, -1).join(', ')}, or ${words[words.length - 1]}`;
-}
-
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const options = context.options[0] || {};
 	const chosenCases = getChosenCases(options);
@@ -156,7 +147,7 @@ const create = context => {
 	const filenameWithExtension = context.getPhysicalFilename();
 
 	if (filenameWithExtension === '<input>' || filenameWithExtension === '<text>') {
-		return {};
+		return;
 	}
 
 	return {
@@ -253,6 +244,7 @@ const schema = [
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

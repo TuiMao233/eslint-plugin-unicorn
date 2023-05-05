@@ -1,7 +1,8 @@
 'use strict';
-const {isCommaToken, isArrowToken, isClosingParenToken} = require('eslint-utils');
+const {isCommaToken, isArrowToken, isClosingParenToken} = require('@eslint-community/eslint-utils');
 const getDocumentationUrl = require('./utils/get-documentation-url.js');
 const {matches, methodCallSelector} = require('./selectors/index.js');
+const {removeParentheses} = require('./fix/index.js');
 const {getParentheses, getParenthesizedText} = require('./utils/parentheses.js');
 const {isNodeMatches, isNodeMatchesNameOrPath} = require('./utils/is-node-matches.js');
 
@@ -147,10 +148,7 @@ function fixReduceAssignOrSpread({sourceCode, node, property}) {
 		const functionBody = node.arguments[0].body;
 		const {keyText, valueText} = getKeyValueText();
 		yield fixer.replaceText(functionBody, `[${keyText}, ${valueText}]`);
-
-		for (const parentheses of getParentheses(functionBody, sourceCode)) {
-			yield fixer.remove(parentheses);
-		}
+		yield * removeParentheses(functionBody, fixer, sourceCode);
 	}
 
 	return function * (fixer) {
@@ -185,17 +183,13 @@ function create(context) {
 
 	for (const {selector, test, getProperty} of fixableArrayReduceCases) {
 		listeners[selector] = node => {
-			// If this listener exits without adding a fix, the `arrayReduceWithEmptyObject` listener
-			// should still add it into the `arrayReduce` map. To be safer, add it here too.
-			arrayReduce.set(node, undefined);
-
 			const [callbackFunction] = node.arguments;
 			if (!test(callbackFunction)) {
 				return;
 			}
 
 			const [firstParameter] = callbackFunction.params;
-			const variables = context.getDeclaredVariables(callbackFunction);
+			const variables = sourceCode.getDeclaredVariables(callbackFunction);
 			const firstParameterVariable = variables.find(variable => variable.identifiers.length === 1 && variable.identifiers[0] === firstParameter);
 			if (!firstParameterVariable || firstParameterVariable.references.length !== 1) {
 				return;
@@ -212,12 +206,6 @@ function create(context) {
 			);
 		};
 	}
-
-	listeners[arrayReduceWithEmptyObject] = node => {
-		if (!arrayReduce.has(node)) {
-			arrayReduce.set(node, undefined);
-		}
-	};
 
 	listeners['Program:exit'] = () => {
 		for (const [node, fix] of arrayReduce.entries()) {
@@ -249,16 +237,17 @@ function create(context) {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			functions: {
 				type: 'array',
 				uniqueItems: true,
 			},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

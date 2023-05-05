@@ -1,5 +1,5 @@
 'use strict';
-const {isParenthesized, hasSideEffect} = require('eslint-utils');
+const {isParenthesized, hasSideEffect} = require('@eslint-community/eslint-utils');
 const {methodCallSelector, notDomNodeSelector} = require('./selectors/index.js');
 const needsSemicolon = require('./utils/needs-semicolon.js');
 const isValueNotUsable = require('./utils/is-value-not-usable.js');
@@ -17,11 +17,13 @@ const selector = [
 	methodCallSelector({
 		method: 'removeChild',
 		argumentsLength: 1,
+		includeOptionalMember: true,
 	}),
 	notDomNodeSelector('callee.object'),
 	notDomNodeSelector('arguments.0'),
 ].join('');
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const sourceCode = context.getSourceCode();
 
@@ -51,7 +53,7 @@ const create = context => {
 				return fixer.replaceText(node, `${childNodeText}.remove()`);
 			};
 
-			if (!hasSideEffect(parentNode, sourceCode) && isValueNotUsable(node)) {
+			if (!hasSideEffect(parentNode, sourceCode) && isValueNotUsable(node) && !node.callee.optional) {
 				problem.fix = fix;
 			} else {
 				problem.suggest = [
@@ -67,6 +69,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -75,7 +78,7 @@ module.exports = {
 			description: 'Prefer `childNode.remove()` over `parentNode.removeChild(childNode)`.',
 		},
 		fixable: 'code',
-		messages,
 		hasSuggestions: true,
+		messages,
 	},
 };

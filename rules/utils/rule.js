@@ -1,9 +1,37 @@
 'use strict';
-const path = require('path');
-const fs = require('fs');
+const path = require('node:path');
+const fs = require('node:fs');
 const getDocumentationUrl = require('./get-documentation-url.js');
 
-const isIterable = object => typeof object[Symbol.iterator] === 'function';
+const isIterable = object => typeof object?.[Symbol.iterator] === 'function';
+
+class FixAbortError extends Error {}
+const fixOptions = {
+	abort() {
+		throw new FixAbortError('Fix aborted.');
+	},
+};
+
+function wrapFixFunction(fix) {
+	return fixer => {
+		const result = fix(fixer, fixOptions);
+
+		if (isIterable(result)) {
+			try {
+				return [...result];
+			} catch (error) {
+				if (error instanceof FixAbortError) {
+					return;
+				}
+
+				/* c8 ignore next */
+				throw error;
+			}
+		}
+
+		return result;
+	};
+}
 
 function reportListenerProblems(listener, context) {
 	// Listener arguments can be `codePath, node` or `node`
@@ -18,11 +46,25 @@ function reportListenerProblems(listener, context) {
 			problems = [problems];
 		}
 
-		// TODO: Allow `fix` function to abort
 		for (const problem of problems) {
-			if (problem) {
-				context.report(problem);
+			if (problem.fix) {
+				problem.fix = wrapFixFunction(problem.fix);
 			}
+
+			if (Array.isArray(problem.suggest)) {
+				for (const suggest of problem.suggest) {
+					if (suggest.fix) {
+						suggest.fix = wrapFixFunction(suggest.fix);
+					}
+
+					suggest.data = {
+						...problem.data,
+						...suggest.data,
+					};
+				}
+			}
+
+			context.report(problem);
 		}
 	};
 }
@@ -34,10 +76,18 @@ function reportProblems(create) {
 		return create;
 	}
 
-	const wrapped = context => Object.fromEntries(
-		Object.entries(create(context))
-			.map(([selector, listener]) => [selector, reportListenerProblems(listener, context)]),
-	);
+	const wrapped = context => {
+		const listeners = create(context);
+
+		if (!listeners) {
+			return {};
+		}
+
+		return Object.fromEntries(
+			Object.entries(listeners)
+				.map(([selector, listener]) => [selector, reportListenerProblems(listener, context)]),
+		);
+	};
 
 	wrappedFunctions.add(wrapped);
 
@@ -58,10 +108,7 @@ function checkVueTemplate(create, options) {
 		const listeners = create(context);
 
 		// `vue-eslint-parser`
-		if (
-			context.parserServices
-			&& context.parserServices.defineTemplateBodyVisitor
-		) {
+		if (context.parserServices?.defineTemplateBodyVisitor) {
 			return visitScriptBlock
 				? context.parserServices.defineTemplateBodyVisitor(listeners, listeners)
 				: context.parserServices.defineTemplateBodyVisitor(listeners);
@@ -74,6 +121,7 @@ function checkVueTemplate(create, options) {
 	return wrapped;
 }
 
+/** @returns {import('eslint').Rule.RuleModule} */
 function loadRule(ruleId) {
 	const rule = require(`../${ruleId}`);
 

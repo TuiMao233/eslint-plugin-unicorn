@@ -1,5 +1,5 @@
 'use strict';
-const {hasSideEffect} = require('eslint-utils');
+const {hasSideEffect} = require('@eslint-community/eslint-utils');
 const {methodCallSelector, notFunctionSelector} = require('./selectors/index.js');
 const {removeArgument} = require('./fix/index.js');
 const {getParentheses, getParenthesizedText} = require('./utils/parentheses.js');
@@ -24,14 +24,27 @@ const ignored = [
 	'_.filter',
 	'underscore.filter',
 	'Vue.filter',
+	'R.filter',
 
 	'lodash.find',
 	'_.find',
 	'underscore.find',
+	'R.find',
+
+	'lodash.findLast',
+	'_.findLast',
+	'underscore.findLast',
+	'R.findLast',
 
 	'lodash.findIndex',
 	'_.findIndex',
 	'underscore.findIndex',
+	'R.findIndex',
+
+	'lodash.findLastIndex',
+	'_.findLastIndex',
+	'underscore.findLastIndex',
+	'R.findLastIndex',
 
 	'lodash.flatMap',
 	'_.flatMap',
@@ -40,6 +53,7 @@ const ignored = [
 	'_.forEach',
 	'React.Children.forEach',
 	'Children.forEach',
+	'R.forEach',
 
 	'lodash.map',
 	'_.map',
@@ -48,6 +62,7 @@ const ignored = [
 	'Children.map',
 	'jQuery.map',
 	'$.map',
+	'R.map',
 
 	'lodash.some',
 	'_.some',
@@ -60,7 +75,9 @@ const selector = [
 			'every',
 			'filter',
 			'find',
+			'findLast',
 			'findIndex',
+			'findLastIndex',
 			'flatMap',
 			'forEach',
 			'map',
@@ -154,6 +171,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -162,7 +180,7 @@ module.exports = {
 			description: 'Disallow using the `this` argument in array methods.',
 		},
 		fixable: 'code',
-		messages,
 		hasSuggestions: true,
+		messages,
 	},
 };

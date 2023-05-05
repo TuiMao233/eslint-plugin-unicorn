@@ -10,11 +10,13 @@ const selector = [
 	methodCallSelector({
 		method: 'appendChild',
 		argumentsLength: 1,
+		includeOptionalMember: true,
 	}),
 	notDomNodeSelector('callee.object'),
 	notDomNodeSelector('arguments.0'),
 ].join('');
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = () => ({
 	[selector](node) {
 		const fix = isValueNotUsable(node)
@@ -29,6 +31,7 @@ const create = () => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

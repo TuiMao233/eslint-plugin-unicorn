@@ -1,5 +1,5 @@
 'use strict';
-const {isSemicolonToken} = require('eslint-utils');
+const {isSemicolonToken} = require('@eslint-community/eslint-utils');
 const getClassHeadLocation = require('./utils/get-class-head-location.js');
 const assertToken = require('./utils/assert-token.js');
 const {removeSpacesAfter} = require('./fix/index.js');
@@ -22,10 +22,7 @@ const isDeclarationOfExportDefaultDeclaration = node =>
 	&& node.parent.type === 'ExportDefaultDeclaration'
 	&& node.parent.declaration === node;
 
-// https://github.com/estree/estree/blob/master/stage3/class-features.md#propertydefinition
-const isPropertyDefinition = node => node.type === 'PropertyDefinition'
-	// Legacy node type
-	|| node.type === 'ClassProperty';
+const isPropertyDefinition = node => node.type === 'PropertyDefinition';
 const isMethodDefinition = node => node.type === 'MethodDefinition';
 
 function isStaticMember(node) {
@@ -40,12 +37,11 @@ function isStaticMember(node) {
 	} = node;
 
 	// Avoid matching unexpected node. For example: https://github.com/tc39/proposal-class-static-block
-	/* istanbul ignore next */
 	if (!isPropertyDefinition(node) && !isMethodDefinition(node)) {
 		return false;
 	}
 
-	if (!isStatic || isPrivate) {
+	if (!isStatic || isPrivate || key.type === 'PrivateIdentifier') {
 		return false;
 	}
 
@@ -53,8 +49,9 @@ function isStaticMember(node) {
 	if (
 		isDeclare
 		|| isReadonly
-		|| typeof accessibility !== 'undefined'
+		|| accessibility !== undefined
 		|| (Array.isArray(decorators) && decorators.length > 0)
+		// TODO: Remove this when we drop support for `@typescript-eslint/parser` v4
 		|| key.type === 'TSPrivateIdentifier'
 	) {
 		return false;
@@ -66,11 +63,7 @@ function isStaticMember(node) {
 function * switchClassMemberToObjectProperty(node, sourceCode, fixer) {
 	const staticToken = sourceCode.getFirstToken(node);
 	assertToken(staticToken, {
-		expected: [
-			{type: 'Keyword', value: 'static'},
-			// `@babel/eslint-parser` use `{type: 'Identifier', value: 'static'}`
-			{type: 'Identifier', value: 'static'},
-		],
+		expected: {type: 'Keyword', value: 'static'},
 		ruleId: 'no-static-only-class',
 	});
 
@@ -147,7 +140,7 @@ function switchClassToObject(node, sourceCode) {
 
 	return function * (fixer) {
 		const classToken = sourceCode.getFirstToken(node);
-		/* istanbul ignore next */
+		/* c8 ignore next */
 		assertToken(classToken, {
 			expected: {type: 'Keyword', value: 'class'},
 			ruleId: 'no-static-only-class',
@@ -222,12 +215,13 @@ function create(context) {
 	};
 }
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
 		type: 'suggestion',
 		docs: {
-			description: 'Forbid classes that only have static members.',
+			description: 'Disallow classes that only have static members.',
 		},
 		fixable: 'code',
 		messages,

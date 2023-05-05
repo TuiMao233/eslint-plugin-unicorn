@@ -1,5 +1,5 @@
 'use strict';
-const {findVariable} = require('eslint-utils');
+const {findVariable} = require('@eslint-community/eslint-utils');
 const getVariableIdentifiers = require('./utils/get-variable-identifiers.js');
 const {
 	matches,
@@ -30,17 +30,7 @@ const arrayStaticMethodSelector = methodCallSelector({
 	path: 'init',
 });
 
-// `array.concat()`
-// `array.copyWithin()`
-// `array.fill()`
-// `array.filter()`
-// `array.flat()`
-// `array.flatMap()`
-// `array.map()`
-// `array.reverse()`
-// `array.slice()`
-// `array.sort()`
-// `array.splice()`
+// Array methods that return an array
 const arrayMethodSelector = methodCallSelector({
 	methods: [
 		'concat',
@@ -54,6 +44,10 @@ const arrayMethodSelector = methodCallSelector({
 		'slice',
 		'sort',
 		'splice',
+		'toReversed',
+		'toSorted',
+		'toSpliced',
+		'with',
 	],
 	path: 'init',
 });
@@ -75,16 +69,10 @@ const selector = [
 ].join('');
 
 const isIncludesCall = node => {
-	/* istanbul ignore next */
-	if (!node.parent || !node.parent.parent) {
-		return false;
-	}
-
-	const {type, optional, callee, arguments: includesArguments} = node.parent.parent;
+	const {type, optional, callee, arguments: includesArguments} = node.parent.parent ?? {};
 	return (
 		type === 'CallExpression'
 		&& !optional
-		&& callee
 		&& callee.type === 'MemberExpression'
 		&& !callee.computed
 		&& !callee.optional
@@ -124,13 +112,14 @@ const isMultipleCall = (identifier, node) => {
 	return false;
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
-	[selector]: node => {
-		const variable = findVariable(context.getScope(), node);
+	[selector](node) {
+		const variable = findVariable(context.getSourceCode().getScope(node), node);
 
 		// This was reported https://github.com/sindresorhus/eslint-plugin-unicorn/issues/1075#issuecomment-768073342
 		// But can't reproduce, just ignore this case
-		/* istanbul ignore next */
+		/* c8 ignore next 3 */
 		if (!variable) {
 			return;
 		}
@@ -172,9 +161,6 @@ const create = context => ({
 			problem.suggest = [
 				{
 					messageId: MESSAGE_ID_SUGGESTION,
-					data: {
-						name: node.name,
-					},
 					fix,
 				},
 			];
@@ -186,6 +172,7 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -194,7 +181,7 @@ module.exports = {
 			description: 'Prefer `Set#has()` over `Array#includes()` when checking for existence or non-existence.',
 		},
 		fixable: 'code',
-		messages,
 		hasSuggestions: true,
+		messages,
 	},
 };

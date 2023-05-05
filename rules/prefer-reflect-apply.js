@@ -1,7 +1,7 @@
 'use strict';
-const isLiteralValue = require('./utils/is-literal-value.js');
-const getPropertyName = require('./utils/get-property-name.js');
+const {getPropertyName} = require('@eslint-community/eslint-utils');
 const {not, methodCallSelector} = require('./selectors/index.js');
+const {isNullLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID = 'prefer-reflect-apply';
 const messages = {
@@ -15,8 +15,7 @@ const selector = [
 
 const isApplySignature = (argument1, argument2) => (
 	(
-		// eslint-disable-next-line unicorn/no-null
-		isLiteralValue(argument1, null)
+		isNullLiteral(argument1)
 		|| argument1.type === 'ThisExpression'
 	)
 	&& (
@@ -49,8 +48,7 @@ const fixFunctionPrototypeCall = (node, sourceCode) => {
 		getPropertyName(node.callee) === 'call'
 		&& getPropertyName(node.callee.object) === 'apply'
 		&& getPropertyName(node.callee.object.object) === 'prototype'
-		&& node.callee.object.object.object
-		&& node.callee.object.object.object.type === 'Identifier'
+		&& node.callee.object.object.object?.type === 'Identifier'
 		&& node.callee.object.object.object.name === 'Function'
 		&& node.arguments.length === 3
 		&& isApplySignature(node.arguments[1], node.arguments[2])
@@ -64,8 +62,9 @@ const fixFunctionPrototypeCall = (node, sourceCode) => {
 	}
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
-	[selector]: node => {
+	[selector](node) {
 		const sourceCode = context.getSourceCode();
 		const fix = fixDirectApplyCall(node, sourceCode) || fixFunctionPrototypeCall(node, sourceCode);
 		if (fix) {
@@ -78,6 +77,7 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

@@ -1,6 +1,6 @@
 'use strict';
 
-const {hasSideEffect, isParenthesized, findVariable} = require('eslint-utils');
+const {hasSideEffect, isParenthesized, findVariable} = require('@eslint-community/eslint-utils');
 const {matches, methodCallSelector} = require('../selectors/index.js');
 const isFunctionSelfUsedInside = require('../utils/is-function-self-used-inside.js');
 
@@ -38,10 +38,11 @@ const isIdentifierNamed = ({type, name}, expectName) => type === 'Identifier' &&
 function simpleArraySearchRule({method, replacement}) {
 	// Add prefix to avoid conflicts in `prefer-includes` rule
 	const MESSAGE_ID_PREFIX = `prefer-${replacement}-over-${method}/`;
-	const ERROR = `${MESSAGE_ID_PREFIX}/error`;
-	const SUGGESTION = `${MESSAGE_ID_PREFIX}/suggestion`;
+	const ERROR = `${MESSAGE_ID_PREFIX}error`;
+	const SUGGESTION = `${MESSAGE_ID_PREFIX}suggestion`;
 	const ERROR_MESSAGES = {
 		findIndex: 'Use `.indexOf()` instead of `.findIndex()` when looking for the index of an item.',
+		findLastIndex: 'Use `.lastIndexOf()` instead of `findLastIndex() when looking for the index of an item.`',
 		some: `Use \`.${replacement}()\` instead of \`.${method}()\` when checking value existence.`,
 	};
 

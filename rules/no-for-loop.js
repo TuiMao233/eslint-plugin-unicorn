@@ -1,11 +1,11 @@
 'use strict';
-const {isClosingParenToken, getStaticValue} = require('eslint-utils');
-const isLiteralValue = require('./utils/is-literal-value.js');
+const {isClosingParenToken, getStaticValue} = require('@eslint-community/eslint-utils');
 const avoidCapture = require('./utils/avoid-capture.js');
 const getScopes = require('./utils/get-scopes.js');
 const singular = require('./utils/singular.js');
 const toLocation = require('./utils/to-location.js');
 const getReferences = require('./utils/get-references.js');
+const {isLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID = 'no-for-loop';
 const messages = {
@@ -13,10 +13,10 @@ const messages = {
 };
 
 const defaultElementName = 'element';
-const isLiteralZero = node => isLiteralValue(node, 0);
-const isLiteralOne = node => isLiteralValue(node, 1);
+const isLiteralZero = node => isLiteral(node, 0);
+const isLiteralOne = node => isLiteral(node, 1);
 
-const isIdentifierWithName = (node, name) => node && node.type === 'Identifier' && node.name === name;
+const isIdentifierWithName = (node, name) => node?.type === 'Identifier' && node.name === name;
 
 const getIndexIdentifierName = forStatement => {
 	const {init: variableDeclaration} = forStatement;
@@ -103,7 +103,7 @@ const getArrayIdentifier = (forStatement, indexIdentifierName) => {
 };
 
 const isLiteralOnePlusIdentifierWithName = (node, identifierName) => {
-	if (node && node.type === 'BinaryExpression' && node.operator === '+') {
+	if (node?.type === 'BinaryExpression' && node.operator === '+') {
 		return (isIdentifierWithName(node.left, identifierName) && isLiteralOne(node.right))
 			|| (isIdentifierWithName(node.right, identifierName) && isLiteralOne(node.left));
 	}
@@ -260,6 +260,7 @@ const someVariablesLeakOutOfTheLoop = (forStatement, variables, forScope) =>
 const getReferencesInChildScopes = (scope, name) =>
 	getReferences(scope).filter(reference => reference.identifier.name === name);
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const sourceCode = context.getSourceCode();
 	const {scopeManager, text: sourceCodeText} = sourceCode;
@@ -279,7 +280,7 @@ const create = context => {
 
 			const arrayIdentifierName = arrayIdentifier.name;
 
-			const scope = context.getScope();
+			const scope = sourceCode.getScope(node);
 			const staticResult = getStaticValue(arrayIdentifier, scope);
 			if (staticResult && !Array.isArray(staticResult.value)) {
 				// Bail out if we can tell that the array variable has a non-array value (i.e. we're looping through the characters of a string constant).
@@ -334,8 +335,8 @@ const create = context => {
 
 				return true;
 			});
-			const elementNode = elementReference && elementReference.identifier.parent.parent;
-			const elementIdentifierName = elementNode && elementNode.id.name;
+			const elementNode = elementReference?.identifier.parent.parent;
+			const elementIdentifierName = elementNode?.id.name;
 			const elementVariable = elementIdentifierName && resolveIdentifierName(elementIdentifierName, bodyScope);
 
 			const shouldFix = !someVariablesLeakOutOfTheLoop(node, [indexVariable, elementVariable].filter(Boolean), forScope);
@@ -411,6 +412,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

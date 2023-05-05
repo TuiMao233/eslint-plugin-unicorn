@@ -1,30 +1,16 @@
 'use strict';
 
+const {getRepositories, getPathIgnorePattern} = require('eslint-remote-tester-repositories');
+
 module.exports = {
 	/** Repositories to scan */
-	repositories: require('./repositories.json'),
-
-	/** Extensions of files under scanning */
-	extensions: ['js', 'jsx', 'ts', 'tsx'],
+	repositories: getRepositories({randomize: true}),
 
 	/** Optional pattern used to exclude paths */
-	pathIgnorePattern: `(${[
-		'node_modules',
-		'\\/\\.', // Any file or directory starting with dot, e.g. '.git'
-		'/dist/',
-		'/build/',
-		// Common patterns for minified JS
-		'babel\\.js',
-		'vendor\\.js',
-		'vendors\\.js',
-		'chunk\\.js',
-		'bundle\\.js',
-		'react-dom\\.development\\.js',
-		'\\.min\\.js', // Any *.min.js
-	].join('|')})`,
+	pathIgnorePattern: getPathIgnorePattern(),
 
-	/** Empty array since we are only interested in linter crashes */
-	rulesUnderTesting: [],
+	/** Extensions of files under scanning */
+	extensions: ['js', 'cjs', 'mjs', 'ts', 'cts', 'mts', 'jsx', 'tsx', 'vue'],
 
 	/** Maximum amount of tasks ran concurrently */
 	concurrentTasks: 3,
@@ -38,17 +24,13 @@ module.exports = {
 	/** ESLint configuration */
 	eslintrc: {
 		root: true,
-		env: {
-			es6: true,
-		},
 		parser: '@typescript-eslint/parser',
 		parserOptions: {
-			ecmaVersion: 2020,
-			sourceType: 'module',
 			ecmaFeatures: {
 				jsx: true,
 			},
+			project: [],
 		},
-		extends: ['plugin:unicorn/recommended'],
+		extends: ['plugin:unicorn/all'],
 	},
 };

@@ -11,13 +11,11 @@ const getDeclaratorOrPropertyValue = declaratorOrProperty =>
 	|| declaratorOrProperty.value;
 
 const isMemberExpressionCall = memberExpression =>
-	memberExpression.parent
-	&& memberExpression.parent.type === 'CallExpression'
+	memberExpression.parent.type === 'CallExpression'
 	&& memberExpression.parent.callee === memberExpression;
 
 const isMemberExpressionAssignment = memberExpression =>
-	memberExpression.parent
-	&& memberExpression.parent.type === 'AssignmentExpression';
+	memberExpression.parent.type === 'AssignmentExpression';
 
 const isMemberExpressionComputedBeyondPrediction = memberExpression =>
 	memberExpression.computed
@@ -80,7 +78,9 @@ const isUnusedVariable = variable => {
 	return !hasReadReference;
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
+	const sourceCode = context.getSourceCode();
 	const getPropertyDisplayName = property => {
 		if (property.key.type === 'Identifier') {
 			return property.key.name;
@@ -90,7 +90,7 @@ const create = context => {
 			return property.key.value;
 		}
 
-		return context.getSource(property.key);
+		return sourceCode.getText(property.key);
 	};
 
 	const checkProperty = (property, references, path) => {
@@ -212,8 +212,8 @@ const create = context => {
 	};
 
 	return {
-		'Program:exit'() {
-			const scopes = getScopes(context.getScope());
+		'Program:exit'(program) {
+			const scopes = getScopes(sourceCode.getScope(program));
 			for (const scope of scopes) {
 				if (scope.type === 'global') {
 					continue;
@@ -225,6 +225,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

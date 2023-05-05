@@ -1,9 +1,10 @@
 'use strict';
-const {isParenthesized} = require('eslint-utils');
+const {isParenthesized} = require('@eslint-community/eslint-utils');
 const needsSemicolon = require('./utils/needs-semicolon.js');
-const {isNumber, isDecimalInteger} = require('./utils/numeric.js');
+const {isDecimalInteger} = require('./utils/numeric.js');
 const toLocation = require('./utils/to-location.js');
 const {fixSpaceAroundKeyword} = require('./fix/index.js');
+const {isNumberLiteral} = require('./ast/index.js');
 
 const MESSAGE_ZERO_FRACTION = 'zero-fraction';
 const MESSAGE_DANGLING_DOT = 'dangling-dot';
@@ -12,9 +13,10 @@ const messages = {
 	[MESSAGE_DANGLING_DOT]: 'Don\'t use a dangling dot in the number.',
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
-	Literal: node => {
-		if (!isNumber(node)) {
+	Literal(node) {
+		if (!isNumberLiteral(node)) {
 			return;
 		}
 
@@ -63,6 +65,7 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

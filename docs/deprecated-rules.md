@@ -1,5 +1,9 @@
 # Deprecated Rules
 
+## import-index
+
+This rule is outdated. JavaScript modules (ESM) do not support importing a directory.
+
 ## no-array-instanceof
 
 This rule was renamed to [`no-instanceof-array`](rules/no-instanceof-array.md) to be more correct.
@@ -35,6 +39,10 @@ This rule was renamed to [`prefer-dom-node-append`](rules/prefer-dom-node-append
 ## prefer-node-remove
 
 This rule was renamed to [`prefer-dom-node-remove`](rules/prefer-dom-node-remove.md) to be less ambiguous.
+
+## prefer-object-has-own
+
+This rule was deprecated in favor of the built-in ESLint [`prefer-object-has-own`](https://eslint.org/docs/rules/prefer-object-has-own) rule.
 
 ## prefer-replace-all
 

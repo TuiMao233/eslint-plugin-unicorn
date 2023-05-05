@@ -1,10 +1,10 @@
 'use strict';
-const isLiteralValue = require('./utils/is-literal-value.js');
 const {
 	getNegativeIndexLengthNode,
 	removeLengthNode,
 } = require('./shared/negative-index.js');
 const typedArray = require('./shared/typed-array.js');
+const {isLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID = 'prefer-negative-index';
 const messages = {
@@ -37,11 +37,32 @@ const methods = new Map([
 		},
 	],
 	[
+		'toSpliced',
+		{
+			argumentsIndexes: [0],
+			supportObjects: new Set([
+				'Array',
+			]),
+		},
+	],
+	[
 		'at',
 		{
 			argumentsIndexes: [0],
 			supportObjects: new Set([
 				'Array',
+				'String',
+				...typedArray,
+			]),
+		},
+	],
+	[
+		'with',
+		{
+			argumentsIndexes: [0],
+			supportObjects: new Set([
+				'Array',
+				...typedArray,
 			]),
 		},
 	],
@@ -52,7 +73,6 @@ const getMemberName = node => {
 
 	if (
 		type === 'MemberExpression'
-		&& property
 		&& property.type === 'Identifier'
 	) {
 		return property.name;
@@ -91,15 +111,15 @@ function parse(node) {
 	const parentCallee = callee.object.object;
 
 	if (
-		// [].{slice,splice}
+		// `[].{slice,splice,toSpliced,at,with}`
 		(
 			parentCallee.type === 'ArrayExpression'
 			&& parentCallee.elements.length === 0
 		)
-		// ''.slice
+		// `''.slice`
 		|| (
 			method === 'slice'
-			&& isLiteralValue(parentCallee, '')
+			&& isLiteral(parentCallee, '')
 		)
 		// {Array,String...}.prototype.slice
 		// Array.prototype.splice
@@ -130,8 +150,9 @@ function parse(node) {
 	}
 }
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
-	'CallExpression[callee.type="MemberExpression"]': node => {
+	'CallExpression[callee.type="MemberExpression"]'(node) {
 		const parsed = parse(node);
 
 		if (!parsed) {
@@ -167,12 +188,13 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
 		type: 'suggestion',
 		docs: {
-			description: 'Prefer negative index over `.length - index` for `{String,Array,TypedArray}#slice()`, `Array#splice()` and `Array#at()`.',
+			description: 'Prefer negative index over `.length - index` when possible.',
 		},
 		fixable: 'code',
 		messages,

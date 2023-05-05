@@ -1,8 +1,13 @@
 # Disallow unreadable array destructuring
 
-Destructuring is very useful, but it can also make some code harder to read. This rule prevents ignoring consecutive values when destructuring from an array.
+💼 This rule is enabled in the ✅ `recommended` [config](https://github.com/sindresorhus/eslint-plugin-unicorn#preset-configs).
 
-This rule is partly fixable.
+🔧 This rule is automatically fixable by the [`--fix` CLI option](https://eslint.org/docs/latest/user-guide/command-line-interface#--fix).
+
+<!-- end auto-generated rule header -->
+<!-- Do not manually modify this header. Run: `npm run fix:eslint-docs` -->
+
+Destructuring is very useful, but it can also make some code harder to read. This rule prevents ignoring consecutive values when destructuring from an array.
 
 ## Fail
 
@@ -21,7 +26,6 @@ const [,,,, foo] = parts;
 ```js
 const [,,...rest] = parts;
 ```
-
 
 ## Pass
 

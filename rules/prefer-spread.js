@@ -1,60 +1,62 @@
 'use strict';
-const {isParenthesized, getStaticValue, isCommaToken, hasSideEffect} = require('eslint-utils');
-const {methodCallSelector, not} = require('./selectors/index.js');
+const {isParenthesized, getStaticValue, isCommaToken, hasSideEffect} = require('@eslint-community/eslint-utils');
+const {methodCallSelector} = require('./selectors/index.js');
 const needsSemicolon = require('./utils/needs-semicolon.js');
 const {getParenthesizedRange, getParenthesizedText} = require('./utils/parentheses.js');
 const shouldAddParenthesesToSpreadElementArgument = require('./utils/should-add-parentheses-to-spread-element-argument.js');
-const isLiteralValue = require('./utils/is-literal-value.js');
 const {isNodeMatches} = require('./utils/is-node-matches.js');
-const {
-	replaceNodeOrTokenAndSpacesBefore,
-	removeSpacesAfter,
-	removeMethodCall,
-} = require('./fix/index.js');
+const {removeMethodCall} = require('./fix/index.js');
+const {isLiteral} = require('./ast/index.js');
+const isMethodNamed = require('./utils/is-method-named.js');
 
 const ERROR_ARRAY_FROM = 'array-from';
 const ERROR_ARRAY_CONCAT = 'array-concat';
 const ERROR_ARRAY_SLICE = 'array-slice';
+const ERROR_ARRAY_TO_SPLICED = 'array-to-spliced';
+const ERROR_STRING_SPLIT = 'string-split';
 const SUGGESTION_CONCAT_ARGUMENT_IS_SPREADABLE = 'argument-is-spreadable';
 const SUGGESTION_CONCAT_ARGUMENT_IS_NOT_SPREADABLE = 'argument-is-not-spreadable';
 const SUGGESTION_CONCAT_TEST_ARGUMENT = 'test-argument';
 const SUGGESTION_CONCAT_SPREAD_ALL_ARGUMENTS = 'spread-all-arguments';
+const SUGGESTION_USE_SPREAD = 'use-spread';
 const messages = {
 	[ERROR_ARRAY_FROM]: 'Prefer the spread operator over `Array.from(…)`.',
 	[ERROR_ARRAY_CONCAT]: 'Prefer the spread operator over `Array#concat(…)`.',
 	[ERROR_ARRAY_SLICE]: 'Prefer the spread operator over `Array#slice()`.',
+	[ERROR_ARRAY_TO_SPLICED]: 'Prefer the spread operator over `Array#toSpliced()`.',
+	[ERROR_STRING_SPLIT]: 'Prefer the spread operator over `String#split(\'\')`.',
 	[SUGGESTION_CONCAT_ARGUMENT_IS_SPREADABLE]: 'First argument is an `array`.',
 	[SUGGESTION_CONCAT_ARGUMENT_IS_NOT_SPREADABLE]: 'First argument is not an `array`.',
 	[SUGGESTION_CONCAT_TEST_ARGUMENT]: 'Test first argument with `Array.isArray(…)`.',
 	[SUGGESTION_CONCAT_SPREAD_ALL_ARGUMENTS]: 'Spread all unknown arguments`.',
+	[SUGGESTION_USE_SPREAD]: 'Use `...` operator.',
 };
 
 const arrayFromCallSelector = [
 	methodCallSelector({
 		object: 'Array',
 		method: 'from',
-		minimumArguments: 1,
-		maximumArguments: 3,
+		argumentsLength: 1,
 	}),
 	// Allow `Array.from({length})`
 	'[arguments.0.type!="ObjectExpression"]',
 ].join('');
 
-const arrayConcatCallSelector = [
-	methodCallSelector('concat'),
-	not(
-		[
-			'Literal',
-			'TemplateLiteral',
-		].map(type => `[callee.object.type="${type}"]`),
-	),
-].join('');
+const arrayConcatCallSelector = methodCallSelector('concat');
 
 const arraySliceCallSelector = [
 	methodCallSelector({
 		method: 'slice',
 		minimumArguments: 0,
 		maximumArguments: 1,
+	}),
+	'[callee.object.type!="ArrayExpression"]',
+].join('');
+
+const arrayToSplicedCallSelector = [
+	methodCallSelector({
+		method: 'toSpliced',
+		argumentsLength: 0,
 	}),
 	'[callee.object.type!="ArrayExpression"]',
 ].join('');
@@ -66,6 +68,11 @@ const ignoredSliceCallee = [
 	'file',
 	'this',
 ];
+
+const stringSplitCallSelector = methodCallSelector({
+	method: 'split',
+	argumentsLength: 1,
+});
 
 const isArrayLiteral = node => node.type === 'ArrayExpression';
 const isArrayLiteralHasTrailingComma = (node, sourceCode) => {
@@ -254,13 +261,6 @@ function fixArrayFrom(node, sourceCode) {
 		return `[...${text}]`;
 	}
 
-	function * removeObject(fixer) {
-		yield * replaceNodeOrTokenAndSpacesBefore(object, '', fixer, sourceCode);
-		const commaToken = sourceCode.getTokenAfter(object, isCommaToken);
-		yield * replaceNodeOrTokenAndSpacesBefore(commaToken, '', fixer, sourceCode);
-		yield removeSpacesAfter(commaToken, sourceCode, fixer);
-	}
-
 	return function * (fixer) {
 		// Fixed code always starts with `[`
 		if (needsSemicolon(sourceCode.getTokenBefore(node), sourceCode, '[')) {
@@ -269,19 +269,11 @@ function fixArrayFrom(node, sourceCode) {
 
 		const objectText = getObjectText();
 
-		if (node.arguments.length === 1) {
-			yield fixer.replaceText(node, objectText);
-			return;
-		}
-
-		// `Array.from(object, mapFunction, thisArgument)` -> `[...object].map(mapFunction, thisArgument)`
-		yield fixer.replaceText(node.callee.object, objectText);
-		yield fixer.replaceText(node.callee.property, 'map');
-		yield * removeObject(fixer);
+		yield fixer.replaceText(node, objectText);
 	};
 }
 
-function fixSlice(node, sourceCode) {
+function methodCallToSpread(node, sourceCode) {
 	return function * (fixer) {
 		// Fixed code always starts with `[`
 		if (needsSemicolon(sourceCode.getTokenBefore(node), sourceCode, '[')) {
@@ -291,7 +283,7 @@ function fixSlice(node, sourceCode) {
 		yield fixer.insertTextBefore(node, '[...');
 		yield fixer.insertTextAfter(node, ']');
 
-		// The array is already accessing `.slice`, there should not any case need add extra `()`
+		// The array is already accessing `.slice` or `.split`, there should not any case need add extra `()`
 
 		yield * removeMethodCall(fixer, node, sourceCode);
 	};
@@ -311,6 +303,27 @@ function isClassName(node) {
 	return /^[A-Z]./.test(name) && name.toUpperCase() !== name;
 }
 
+function isNotArray(node, scope) {
+	if (
+		node.type === 'TemplateLiteral'
+		|| node.type === 'Literal'
+		|| node.type === 'BinaryExpression'
+		|| isClassName(node)
+		// `foo.join()`
+		|| (isMethodNamed(node, 'join') && node.arguments.length <= 1)
+	) {
+		return true;
+	}
+
+	const staticValue = getStaticValue(node, scope);
+	if (staticValue && !Array.isArray(staticValue.value)) {
+		return true;
+	}
+
+	return false;
+}
+
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const sourceCode = context.getSourceCode();
 
@@ -324,14 +337,13 @@ const create = context => {
 		},
 		[arrayConcatCallSelector](node) {
 			const {object} = node.callee;
+			const scope = sourceCode.getScope(object);
 
-			if (isClassName(object)) {
+			if (isNotArray(object, scope)) {
 				return;
 			}
 
-			const scope = context.getScope();
 			const staticResult = getStaticValue(object, scope);
-
 			if (staticResult && !Array.isArray(staticResult.value)) {
 				return;
 			}
@@ -411,28 +423,78 @@ const create = context => {
 			}
 
 			const [firstArgument] = node.arguments;
-			if (firstArgument && !isLiteralValue(firstArgument, 0)) {
+			if (firstArgument && !isLiteral(firstArgument, 0)) {
 				return;
 			}
 
 			return {
 				node: node.callee.property,
 				messageId: ERROR_ARRAY_SLICE,
-				fix: fixSlice(node, sourceCode),
+				fix: methodCallToSpread(node, sourceCode),
 			};
+		},
+		[arrayToSplicedCallSelector](node) {
+			return {
+				node: node.callee.property,
+				messageId: ERROR_ARRAY_TO_SPLICED,
+				fix: methodCallToSpread(node, sourceCode),
+			};
+		},
+		[stringSplitCallSelector](node) {
+			const [separator] = node.arguments;
+			if (!isLiteral(separator, '')) {
+				return;
+			}
+
+			const string = node.callee.object;
+			const staticValue = getStaticValue(string, sourceCode.getScope(string));
+			let hasSameResult = false;
+			if (staticValue) {
+				const {value} = staticValue;
+
+				if (typeof value !== 'string') {
+					return;
+				}
+
+				// eslint-disable-next-line unicorn/prefer-spread
+				const resultBySplit = value.split('');
+				const resultBySpread = [...value];
+
+				hasSameResult = resultBySplit.length === resultBySpread.length
+					&& resultBySplit.every((character, index) => character === resultBySpread[index]);
+			}
+
+			const problem = {
+				node: node.callee.property,
+				messageId: ERROR_STRING_SPLIT,
+			};
+
+			if (hasSameResult) {
+				problem.fix = methodCallToSpread(node, sourceCode);
+			} else {
+				problem.suggest = [
+					{
+						messageId: SUGGESTION_USE_SPREAD,
+						fix: methodCallToSpread(node, sourceCode),
+					},
+				];
+			}
+
+			return problem;
 		},
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
 		type: 'suggestion',
 		docs: {
-			description: 'Prefer the spread operator over `Array.from(…)`, `Array#concat(…)` and `Array#slice()`.',
+			description: 'Prefer the spread operator over `Array.from(…)`, `Array#concat(…)`, `Array#{slice,toSpliced}()` and `String#split(\'\')`.',
 		},
 		fixable: 'code',
-		messages,
 		hasSuggestions: true,
+		messages,
 	},
 };

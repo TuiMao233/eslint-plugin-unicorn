@@ -16,8 +16,6 @@ const createError = (functionNameWithKind, loc) => ({
 test({
 	testerOptions: {
 		parserOptions: {
-			sourceType: 'module',
-			ecmaVersion: 2021,
 			ecmaFeatures: {
 				jsx: true,
 			},
@@ -218,12 +216,12 @@ test({
 		`,
 		// Functions that could be extracted are conservatively ignored due to JSX masking references
 		outdent`
-				function Foo() {
-					function Bar () {
-						return <div />
-					}
-					return <div>{ Bar() }</div>
+			function Foo() {
+				function Bar () {
+					return <div />
 				}
+				return <div>{ Bar() }</div>
+			}
 		`,
 		outdent`
 			function foo() {
@@ -268,6 +266,11 @@ test({
 		// React Hooks
 		outdent`
 			useEffect(() => {
+				function foo() {}
+			}, [])
+		`,
+		outdent`
+			React.useEffect(() => {
 				function foo() {}
 			}, [])
 		`,
@@ -641,6 +644,14 @@ test({
 				}, [])
 			`,
 			errors: [createError('function \'bar\'')],
+		},
+		{
+			code: outdent`
+				NotReact.useEffect(() => {
+					function foo() {}
+				}, [])
+			`,
+			errors: [createError('function \'foo\'')],
 		},
 		// IIFE
 		{

@@ -1,6 +1,7 @@
 'use strict';
 const avoidCapture = require('./utils/avoid-capture.js');
-const {not, notLeftHandSideSelector} = require('./selectors/index.js');
+const {not} = require('./selectors/index.js');
+const isLeftHandSide = require('./utils/is-left-hand-side.js');
 
 const MESSAGE_ID = 'consistentDestructuring';
 const MESSAGE_ID_SUGGEST = 'consistentDestructuringSuggest';
@@ -15,7 +16,6 @@ const declaratorSelector = [
 const memberSelector = [
 	'MemberExpression',
 	'[computed!=true]',
-	notLeftHandSideSelector(),
 	not([
 		'CallExpression > .callee',
 		'NewExpression> .callee',
@@ -51,32 +51,37 @@ const isChildInParentScope = (child, parent) => {
 	return false;
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
-	const source = context.getSourceCode();
+	const sourceCode = context.getSourceCode();
 	const declarations = new Map();
 
 	return {
-		[declaratorSelector]: node => {
+		[declaratorSelector](node) {
 			// Ignore any complex expressions (e.g. arrays, functions)
 			if (!isSimpleExpression(node.init)) {
 				return;
 			}
 
-			declarations.set(source.getText(node.init), {
-				scope: context.getScope(),
-				variables: context.getDeclaredVariables(node),
+			declarations.set(sourceCode.getText(node.init), {
+				scope: sourceCode.getScope(node),
+				variables: sourceCode.getDeclaredVariables(node),
 				objectPattern: node.id,
 			});
 		},
-		[memberSelector]: node => {
-			const declaration = declarations.get(source.getText(node.object));
+		[memberSelector](node) {
+			if (isLeftHandSide(node)) {
+				return;
+			}
+
+			const declaration = declarations.get(sourceCode.getText(node.object));
 
 			if (!declaration) {
 				return;
 			}
 
 			const {scope, objectPattern} = declaration;
-			const memberScope = context.getScope();
+			const memberScope = sourceCode.getScope(node);
 
 			// Property is destructured outside the current scope
 			if (!isChildInParentScope(memberScope, scope)) {
@@ -92,8 +97,8 @@ const create = context => {
 
 			const hasRest = lastProperty && lastProperty.type === 'RestElement';
 
-			const expression = source.getText(node);
-			const member = source.getText(node.property);
+			const expression = sourceCode.getText(node);
+			const member = sourceCode.getText(node.property);
 
 			// Member might already be destructured
 			const destructuredMember = destructurings.find(property =>
@@ -149,6 +154,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -157,10 +163,10 @@ module.exports = {
 			description: 'Use destructured variables over properties.',
 		},
 		fixable: 'code',
+		hasSuggestions: true,
 		messages: {
 			[MESSAGE_ID]: 'Use destructured variables over properties.',
 			[MESSAGE_ID_SUGGEST]: 'Replace `{{expression}}` with destructured property `{{property}}`.',
 		},
-		hasSuggestions: true,
 	},
 };

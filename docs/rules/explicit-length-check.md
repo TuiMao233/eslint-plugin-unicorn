@@ -1,6 +1,13 @@
 # Enforce explicitly comparing the `length` or `size` property of a value
 
-Enforce explicitly checking the length of an object and enforce the comparison style.
+💼 This rule is enabled in the ✅ `recommended` [config](https://github.com/sindresorhus/eslint-plugin-unicorn#preset-configs).
+
+🔧💡 This rule is automatically fixable by the [`--fix` CLI option](https://eslint.org/docs/latest/user-guide/command-line-interface#--fix) and manually fixable by [editor suggestions](https://eslint.org/docs/developer-guide/working-with-rules#providing-suggestions).
+
+<!-- end auto-generated rule header -->
+<!-- Do not manually modify this header. Run: `npm run fix:eslint-docs` -->
+
+This rule is only meant to enforce a specific style and make comparisons more clear.
 
 This rule is fixable, unless it's [unsafe to fix](#unsafe-to-fix-case).
 
@@ -35,7 +42,7 @@ const isEmpty = 1 > foo.length;
 ```
 
 ```js
-// Negative style is forbidden too
+// Negative style is disallowed too
 const isEmpty = !(foo.length > 0);
 ```
 
@@ -100,7 +107,7 @@ const isNotEmpty = Boolean(foo.length);
 ```
 
 ```js
-// Negative style is forbidden too
+// Negative style is disallowed too
 const isNotEmpty = !(foo.length === 0);
 ```
 
@@ -152,9 +159,9 @@ You can define your preferred way of checking non-zero length by providing a `no
 The `non-zero` option can be configured with one of the following:
 
 - `greater-than` (default)
-	- Enforces non-zero to be checked with: `foo.length > 0`
+  - Enforces non-zero to be checked with: `foo.length > 0`
 - `not-equal`
-	- Enforces non-zero to be checked with: `foo.length !== 0`
+  - Enforces non-zero to be checked with: `foo.length !== 0`
 
 ## Unsafe to fix case
 

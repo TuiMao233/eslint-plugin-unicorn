@@ -2,6 +2,11 @@ name: CI
 on:
   - push
   - pull_request
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     name: Node.js ${{ matrix.node-version }} on ${{ matrix.os }}
@@ -10,18 +15,17 @@ jobs:
       fail-fast: false
       matrix:
         node-version:
+          - 20
           - 16
-          - 14
-          - 12
         os:
           - ubuntu-latest
           - windows-latest
-        exclude:
+        include:
           - os: ubuntu-latest
-            node-version: 16
+            node-version: 18
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm install
@@ -29,33 +33,50 @@ jobs:
   lint-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
-        with:
-          node-version: 16
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
       - run: npm install
-      - run: npx xo
+      - run: npm run lint
+      - run: rm -rf test/snapshots
       # Force update snapshots, https://github.com/avajs/ava/discussions/2754
-      - run: npx nyc ava --update-snapshots
+      - run: npx c8 ava --update-snapshots
         env:
           AVA_FORCE_CI: not-ci
-      - run: npm run generate-rules-table
-      - run: npm run generate-usage-example
-      - run: git diff --exit-code --name-only
-      - uses: codecov/codecov-action@v1
+      - run: git diff --exit-code
+      - uses: codecov/codecov-action@v3
         with:
           fail_ci_if_error: true
   run-rules-on-codebase:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
       - run: npm install
       - run: npm run run-rules-on-codebase
   integration:
+    name: Integration test (${{ matrix.group }})
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+          - "5"
+          - "6"
+          - "7"
+          - "8"
+          - "9"
+          - "10"
+          - "11"
+          - "12"
+          - "13"
+    env:
+      TIMING: 1
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
       - run: npm install
-      - run: npm run integration
+      - run: npm run integration -- --group ${{ matrix.group }}

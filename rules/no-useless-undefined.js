@@ -1,6 +1,7 @@
 'use strict';
-const {isCommaToken} = require('eslint-utils');
+const {isCommaToken} = require('@eslint-community/eslint-utils');
 const {replaceNodeOrTokenAndSpacesBefore} = require('./fix/index.js');
+const {isUndefined} = require('./ast/index.js');
 
 const messageId = 'no-useless-undefined';
 const messages = {
@@ -33,8 +34,6 @@ const variableInitSelector = getSelector(
 // `const {foo = undefined} = {}`
 const assignmentPatternSelector = getSelector('AssignmentPattern', 'right');
 
-const isUndefined = node => node && node.type === 'Identifier' && node.name === 'undefined';
-
 const compareFunctionNames = new Set([
 	'is',
 	'equal',
@@ -64,21 +63,32 @@ const shouldIgnore = node => {
 	} else if (
 		node.type === 'MemberExpression'
 		&& node.computed === false
-		&& node.property
 		&& node.property.type === 'Identifier'
 	) {
 		name = node.property.name;
 	}
 
 	return compareFunctionNames.has(name)
-		// `set.add(undefined)`
-		|| name === 'add'
-		// `map.set(foo, undefined)`
-		|| name === 'set'
 		// `array.push(undefined)`
 		|| name === 'push'
 		// `array.unshift(undefined)`
-		|| name === 'unshift';
+		|| name === 'unshift'
+		// `array.includes(undefined)`
+		|| name === 'includes'
+
+		// `set.add(undefined)`
+		|| name === 'add'
+		// `set.has(undefined)`
+		|| name === 'has'
+
+		// `map.set(foo, undefined)`
+		|| name === 'set'
+
+		// `React.createContext(undefined)`
+		|| name === 'createContext'
+
+		// https://vuejs.org/api/reactivity-core.html#ref
+		|| name === 'ref';
 };
 
 const getFunction = scope => {
@@ -89,11 +99,21 @@ const getFunction = scope => {
 	}
 };
 
+const isFunctionBindCall = node =>
+	!node.optional
+	&& node.callee.type === 'MemberExpression'
+	&& !node.callee.computed
+	&& node.callee.property.type === 'Identifier'
+	&& node.callee.property.name === 'bind';
+
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
+	const sourceCode = context.getSourceCode();
+
 	const listener = (fix, checkFunctionReturnType) => node => {
 		if (checkFunctionReturnType) {
-			const functionNode = getFunction(context.getScope());
-			if (functionNode && functionNode.returnType) {
+			const functionNode = getFunction(sourceCode.getScope(node));
+			if (functionNode?.returnType) {
 				return;
 			}
 		}
@@ -105,7 +125,6 @@ const create = context => {
 		};
 	};
 
-	const sourceCode = context.getSourceCode();
 	const options = {
 		checkArguments: true,
 		...context.options[0],
@@ -139,6 +158,12 @@ const create = context => {
 			}
 
 			const argumentNodes = node.arguments;
+
+			// Ignore arguments in `Function#bind()`, but not `this` argument
+			if (isFunctionBindCall(node) && argumentNodes.length !== 1) {
+				return;
+			}
+
 			const undefinedArguments = [];
 			for (let index = argumentNodes.length - 1; index >= 0; index--) {
 				const node = argumentNodes[index];
@@ -162,7 +187,7 @@ const create = context => {
 					start: firstUndefined.loc.start,
 					end: lastUndefined.loc.end,
 				},
-				fix: fixer => {
+				fix(fixer) {
 					let start = firstUndefined.range[0];
 					let end = lastUndefined.range[1];
 
@@ -172,7 +197,7 @@ const create = context => {
 						start = previousArgument.range[1];
 					} else {
 						// If all arguments removed, and there is trailing comma, we need remove it.
-						const tokenAfter = context.getTokenAfter(lastUndefined);
+						const tokenAfter = sourceCode.getTokenAfter(lastUndefined);
 						if (isCommaToken(tokenAfter)) {
 							end = tokenAfter.range[1];
 						}
@@ -190,15 +215,16 @@ const create = context => {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			checkArguments: {
 				type: 'boolean',
 			},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

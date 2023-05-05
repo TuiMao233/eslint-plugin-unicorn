@@ -2,7 +2,9 @@
 const readPkgUp = require('read-pkg-up');
 const semver = require('semver');
 const ci = require('ci-info');
-const baseRule = require('eslint/lib/rules/no-warning-comments');
+const getBuiltinRule = require('./utils/get-builtin-rule.js');
+
+const baseRule = getBuiltinRule('no-warning-comments');
 
 // `unicorn/` prefix is added to avoid conflicts with core rule
 const MESSAGE_ID_AVOID_MULTIPLE_DATES = 'unicorn/avoidMultipleDates';
@@ -45,7 +47,10 @@ const messages = {
 		'Unexpected \'{{matchedTerm}}\' comment without any conditions: \'{{comment}}\'.',
 };
 
-const packageResult = readPkgUp.sync();
+// We don't need to normalize the package.json data, because we are only using 2 properties and those 2 properties
+// aren't validated by the normalization. But when this plugin is used in a monorepo, the name field in the
+// package.json is invalid and would make this plugin throw an error. See also #1871
+const packageResult = readPkgUp.sync({normalize: false});
 const hasPackage = Boolean(packageResult);
 const packageJson = hasPackage ? packageResult.packageJson : {};
 
@@ -184,13 +189,13 @@ function parseTodoMessage(todoString) {
 	return afterArguments;
 }
 
-function reachedDate(past) {
-	const now = new Date().toISOString().slice(0, 10);
+function reachedDate(past, now) {
 	return Date.parse(past) < Date.parse(now);
 }
 
 function tryToCoerceVersion(rawVersion) {
-	/* istanbul ignore if: version in `package.json` and comment can't be empty */
+	// `version` in `package.json` and comment can't be empty
+	/* c8 ignore next 3 */
 	if (!rawVersion) {
 		return false;
 	}
@@ -213,12 +218,14 @@ function tryToCoerceVersion(rawVersion) {
 
 	// Get only the first member for cases such as `1.0.0 - 2.9999.9999`
 	const parts = version.split(' ');
-	/* istanbul ignore if: We don't have this `package.json` to test */
+	// We don't have this `package.json` to test
+	/* c8 ignore next 3 */
 	if (parts.length > 1) {
 		version = parts[0];
 	}
 
-	/* istanbul ignore if: We don't have this `package.json` to test */
+	// We don't have this `package.json` to test
+	/* c8 ignore next 3 */
 	if (semver.valid(version)) {
 		return version;
 	}
@@ -228,7 +235,8 @@ function tryToCoerceVersion(rawVersion) {
 		// But coerce can't parse pre-releases.
 		return semver.parse(version) || semver.coerce(version);
 	} catch {
-		/* istanbul ignore next: We don't have this `package.json` to test */
+		// We don't have this `package.json` to test
+		/* c8 ignore next 3 */
 		return false;
 	}
 }
@@ -240,12 +248,14 @@ function semverComparisonForOperator(operator) {
 	}[operator];
 }
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const options = {
 		terms: ['todo', 'fixme', 'xxx'],
 		ignore: [],
 		ignoreDatesOnPullRequests: true,
 		allowWarningComments: true,
+		date: new Date().toISOString().slice(0, 10),
 		...context.options[0],
 	};
 
@@ -322,15 +332,15 @@ const create = context => {
 			});
 		} else if (dates.length === 1) {
 			uses++;
-			const [date] = dates;
+			const [expirationDate] = dates;
 
 			const shouldIgnore = options.ignoreDatesOnPullRequests && ci.isPR;
-			if (!shouldIgnore && reachedDate(date)) {
+			if (!shouldIgnore && reachedDate(expirationDate, options.date)) {
 				context.report({
 					loc: comment.loc,
 					messageId: MESSAGE_ID_EXPIRED_TODO,
 					data: {
-						expirationDate: date,
+						expirationDate,
 						message: parseTodoMessage(comment.value),
 					},
 				});
@@ -400,11 +410,12 @@ const create = context => {
 			const todoVersion = tryToCoerceVersion(dependency.version);
 			const targetPackageVersion = tryToCoerceVersion(targetPackageRawVersion);
 
-			/* istanbul ignore if: Can't test in Node.js */
+			/* c8 ignore start */
 			if (!hasTargetPackage || !targetPackageVersion) {
 				// Can't compare `¯\_(ツ)_/¯`
 				continue;
 			}
+			/* c8 ignore end */
 
 			const compare = semverComparisonForOperator(dependency.condition);
 
@@ -428,7 +439,7 @@ const create = context => {
 			const targetPackageRawEngineVersion = packageEngines.node;
 			const hasTargetEngine = Boolean(targetPackageRawEngineVersion);
 
-			/* istanbul ignore if: Can't test in this repo */
+			/* c8 ignore next 3 */
 			if (!hasTargetEngine) {
 				continue;
 			}
@@ -508,6 +519,7 @@ const create = context => {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			terms: {
 				type: 'array',
@@ -527,11 +539,15 @@ const schema = [
 				type: 'boolean',
 				default: false,
 			},
+			date: {
+				type: 'string',
+				format: 'date',
+			},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

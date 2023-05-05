@@ -1,5 +1,5 @@
 'use strict';
-const quoteString = require('./utils/quote-string.js');
+const escapeString = require('./utils/escape-string.js');
 const escapeTemplateElementRaw = require('./utils/escape-template-element-raw.js');
 const {replaceTemplateElement} = require('./fix/index.js');
 
@@ -61,6 +61,7 @@ function getReplacements(patterns) {
 		});
 }
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const {patterns} = {
 		patterns: {},
@@ -69,11 +70,11 @@ const create = context => {
 	const replacements = getReplacements(patterns);
 
 	if (replacements.length === 0) {
-		return {};
+		return;
 	}
 
 	return {
-		'Literal, TemplateElement': node => {
+		'Literal, TemplateElement'(node) {
 			const {type, value, raw} = node;
 
 			let string;
@@ -94,21 +95,20 @@ const create = context => {
 			}
 
 			const {fix: autoFix, message = defaultMessage, match, suggest, regex} = replacement;
-			const messageData = {
-				match,
-				suggest,
-			};
 			const problem = {
 				node,
 				message,
-				data: messageData,
+				data: {
+					match,
+					suggest,
+				},
 			};
 
 			const fixed = string.replace(regex, suggest);
 			const fix = type === 'Literal'
 				? fixer => fixer.replaceText(
 					node,
-					quoteString(fixed, raw[0]),
+					escapeString(fixed, raw[0]),
 				)
 				: fixer => replaceTemplateElement(
 					fixer,
@@ -122,7 +122,6 @@ const create = context => {
 				problem.suggest = [
 					{
 						messageId: SUGGESTION_MESSAGE_ID,
-						data: messageData,
 						fix,
 					},
 				];
@@ -136,6 +135,7 @@ const create = context => {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			patterns: {
 				type: 'object',
@@ -167,10 +167,10 @@ const schema = [
 					],
 				}},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -179,8 +179,8 @@ module.exports = {
 			description: 'Enforce better string content.',
 		},
 		fixable: 'code',
+		hasSuggestions: true,
 		schema,
 		messages,
-		hasSuggestions: true,
 	},
 };

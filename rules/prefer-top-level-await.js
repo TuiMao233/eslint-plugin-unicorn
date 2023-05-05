@@ -1,6 +1,6 @@
 'use strict';
-const {findVariable, getFunctionHeadLocation} = require('eslint-utils');
-const {matches, memberExpressionSelector} = require('./selectors/index.js');
+const {findVariable, getFunctionHeadLocation} = require('@eslint-community/eslint-utils');
+const {matches, not, memberExpressionSelector} = require('./selectors/index.js');
 
 const ERROR_PROMISE = 'promise';
 const ERROR_IIFE = 'iife';
@@ -13,7 +13,12 @@ const messages = {
 	[SUGGESTION_ADD_AWAIT]: 'Insert `await`.',
 };
 
-const topLevelCallExpression = 'Program > ExpressionStatement > CallExpression[optional!=true].expression';
+const promiseMethods = ['then', 'catch', 'finally'];
+
+const topLevelCallExpression = [
+	'CallExpression',
+	not([':function *', 'ClassDeclaration *', 'ClassExpression *']),
+].join('');
 const iife = [
 	topLevelCallExpression,
 	matches([
@@ -27,7 +32,8 @@ const promise = [
 	topLevelCallExpression,
 	memberExpressionSelector({
 		path: 'callee',
-		properties: ['then', 'catch', 'finally'],
+		properties: promiseMethods,
+		includeOptional: true,
 	}),
 ].join('');
 const identifier = [
@@ -35,24 +41,58 @@ const identifier = [
 	'[callee.type="Identifier"]',
 ].join('');
 
+const isPromiseMethodCalleeObject = node =>
+	node.parent.type === 'MemberExpression'
+	&& node.parent.object === node
+	&& !node.parent.computed
+	&& node.parent.property.type === 'Identifier'
+	&& promiseMethods.includes(node.parent.property.name)
+	&& node.parent.parent.type === 'CallExpression'
+	&& node.parent.parent.callee === node.parent;
+const isAwaitArgument = node => {
+	if (node.parent.type === 'ChainExpression') {
+		node = node.parent;
+	}
+
+	return node.parent.type === 'AwaitExpression' && node.parent.argument === node;
+};
+
 /** @param {import('eslint').Rule.RuleContext} context */
 function create(context) {
+	if (context.getFilename().toLowerCase().endsWith('.cjs')) {
+		return;
+	}
+
+	const sourceCode = context.getSourceCode();
+
 	return {
 		[promise](node) {
+			if (isPromiseMethodCalleeObject(node) || isAwaitArgument(node)) {
+				return;
+			}
+
 			return {
 				node: node.callee.property,
 				messageId: ERROR_PROMISE,
 			};
 		},
 		[iife](node) {
+			if (isPromiseMethodCalleeObject(node) || isAwaitArgument(node)) {
+				return;
+			}
+
 			return {
 				node,
-				loc: getFunctionHeadLocation(node.callee, context.getSourceCode()),
+				loc: getFunctionHeadLocation(node.callee, sourceCode),
 				messageId: ERROR_IIFE,
 			};
 		},
 		[identifier](node) {
-			const variable = findVariable(context.getScope(), node.callee);
+			if (isPromiseMethodCalleeObject(node) || isAwaitArgument(node)) {
+				return;
+			}
+
+			const variable = findVariable(sourceCode.getScope(node), node.callee);
 			if (!variable || variable.defs.length !== 1) {
 				return;
 			}
@@ -62,7 +102,8 @@ function create(context) {
 				? definition.node.init
 				: definition.node;
 			if (
-				!(
+				!value
+				|| !(
 					(
 						value.type === 'ArrowFunctionExpression'
 						|| value.type === 'FunctionExpression'
@@ -88,6 +129,7 @@ function create(context) {
 	};
 }
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -95,7 +137,7 @@ module.exports = {
 		docs: {
 			description: 'Prefer top-level await over top-level promises and async function calls.',
 		},
-		messages,
 		hasSuggestions: true,
+		messages,
 	},
 };

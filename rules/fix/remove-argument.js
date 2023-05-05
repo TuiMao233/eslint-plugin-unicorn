@@ -1,5 +1,5 @@
 'use strict';
-const {isCommaToken} = require('eslint-utils');
+const {isCommaToken} = require('@eslint-community/eslint-utils');
 const {getParentheses} = require('../utils/parentheses.js');
 
 function removeArgument(fixer, node, sourceCode) {
@@ -17,13 +17,14 @@ function removeArgument(fixer, node, sourceCode) {
 	}
 
 	// If the removed argument is the only argument, the trailing comma must be removed too
-	/* istanbul ignore next: Not reachable for now */
+	/* c8 ignore start */
 	if (callExpression.arguments.length === 1) {
 		const tokenAfter = sourceCode.getTokenBefore(lastToken);
 		if (isCommaToken(tokenAfter)) {
 			end = tokenAfter[1];
 		}
 	}
+	/* c8 ignore end */
 
 	return fixer.replaceTextRange([start, end], '');
 }

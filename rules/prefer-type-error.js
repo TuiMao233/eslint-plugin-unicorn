@@ -6,7 +6,7 @@ const messages = {
 	[MESSAGE_ID]: '`new Error()` is too unspecific for a type check. Use `new TypeError()` instead.',
 };
 
-const tcIdentifiers = new Set([
+const typeCheckIdentifiers = new Set([
 	'isArguments',
 	'isArray',
 	'isArrayBuffer',
@@ -46,7 +46,7 @@ const tcIdentifiers = new Set([
 	'isXMLDoc',
 ]);
 
-const tcGlobalIdentifiers = new Set([
+const typeCheckGlobalIdentifiers = new Set([
 	'isNaN',
 	'isFinite',
 ]);
@@ -61,8 +61,8 @@ const isTypecheckingIdentifier = (node, callExpression, isMemberExpression) =>
 	&& callExpression.arguments.length > 0
 	&& node.type === 'Identifier'
 	&& (
-		(isMemberExpression === true && tcIdentifiers.has(node.name))
-		|| (isMemberExpression === false && tcGlobalIdentifiers.has(node.name))
+		(isMemberExpression === true && typeCheckIdentifiers.has(node.name))
+		|| (isMemberExpression === false && typeCheckGlobalIdentifiers.has(node.name))
 	);
 
 const isLone = node => node.parent && node.parent.body && node.parent.body.length === 1;
@@ -81,37 +81,51 @@ const isTypecheckingMemberExpression = (node, callExpression) => {
 
 const isTypecheckingExpression = (node, callExpression) => {
 	switch (node.type) {
-		case 'Identifier':
+		case 'Identifier': {
 			return isTypecheckingIdentifier(node, callExpression, false);
-		case 'MemberExpression':
+		}
+
+		case 'MemberExpression': {
 			return isTypecheckingMemberExpression(node, callExpression);
-		case 'CallExpression':
+		}
+
+		case 'CallExpression': {
 			return isTypecheckingExpression(node.callee, node);
-		case 'UnaryExpression':
+		}
+
+		case 'UnaryExpression': {
 			return (
 				node.operator === 'typeof'
 				|| (node.operator === '!' && isTypecheckingExpression(node.argument))
 			);
-		case 'BinaryExpression':
+		}
+
+		case 'BinaryExpression': {
 			return (
 				node.operator === 'instanceof'
 				|| isTypecheckingExpression(node.left, callExpression)
 				|| isTypecheckingExpression(node.right, callExpression)
 			);
-		case 'LogicalExpression':
+		}
+
+		case 'LogicalExpression': {
 			return (
 				isTypecheckingExpression(node.left, callExpression)
 				&& isTypecheckingExpression(node.right, callExpression)
 			);
-		default:
+		}
+
+		default: {
 			return false;
+		}
 	}
 };
 
 const isTypechecking = node => node.type === 'IfStatement' && isTypecheckingExpression(node.test);
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = () => ({
-	[selector]: node => {
+	[selector](node) {
 		if (
 			isLone(node)
 			&& node.parent.parent
@@ -127,6 +141,7 @@ const create = () => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

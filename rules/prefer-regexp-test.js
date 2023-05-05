@@ -1,15 +1,18 @@
 'use strict';
-const {isParenthesized, getStaticValue} = require('eslint-utils');
+const {isParenthesized, getStaticValue} = require('@eslint-community/eslint-utils');
 const {checkVueTemplate} = require('./utils/rule.js');
 const {methodCallSelector} = require('./selectors/index.js');
+const {isRegexLiteral, isNewExpression} = require('./ast/index.js');
 const {isBooleanNode} = require('./utils/boolean.js');
 const shouldAddParenthesesToMemberExpressionObject = require('./utils/should-add-parentheses-to-member-expression-object.js');
 
 const REGEXP_EXEC = 'regexp-exec';
 const STRING_MATCH = 'string-match';
+const SUGGESTION = 'suggestion';
 const messages = {
 	[REGEXP_EXEC]: 'Prefer `.test(…)` over `.exec(…)`.',
 	[STRING_MATCH]: 'Prefer `RegExp#test(…)` over `String#match(…)`.',
+	[SUGGESTION]: 'Switch to `RegExp#test(…)`.',
 };
 
 const cases = [
@@ -66,22 +69,24 @@ const cases = [
 	},
 ];
 
-const isRegExpNode = node => {
-	if (node.type === 'Literal' && node.regex) {
-		return true;
+const isRegExpNode = node => isRegexLiteral(node) || isNewExpression(node, {name: 'RegExp'});
+
+const isRegExpWithoutGlobalFlag = (node, scope) => {
+	const staticResult = getStaticValue(node, scope);
+
+	// Don't know if there is `g` flag
+	if (!staticResult) {
+		return false;
 	}
 
-	if (
-		node.type === 'NewExpression'
-		&& node.callee.type === 'Identifier'
-		&& node.callee.name === 'RegExp'
-	) {
-		return true;
-	}
-
-	return false;
+	const {value} = staticResult;
+	return (
+		Object.prototype.toString.call(value) === '[object RegExp]'
+		&& !value.global
+	);
 };
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => Object.fromEntries(
 	cases.map(checkCase => [
 		checkCase.selector,
@@ -103,25 +108,29 @@ const create = context => Object.fromEntries(
 				messageId: type,
 			};
 
-			if (!isRegExpNode(regexpNode)) {
-				const staticResult = getStaticValue(regexpNode, context.getScope());
-				if (staticResult) {
-					const {value} = staticResult;
-					if (
-						Object.prototype.toString.call(value) !== '[object RegExp]'
-						|| value.flags.includes('g')
-					) {
-						return problem;
-					}
-				}
+			const sourceCode = context.getSourceCode();
+			const fixFunction = fixer => fix(fixer, nodes, sourceCode);
+
+			if (
+				isRegExpNode(regexpNode)
+				|| isRegExpWithoutGlobalFlag(regexpNode, sourceCode.getScope(regexpNode))
+			) {
+				problem.fix = fixFunction;
+			} else {
+				problem.suggest = [
+					{
+						messageId: SUGGESTION,
+						fix: fixFunction,
+					},
+				];
 			}
 
-			problem.fix = fixer => fix(fixer, nodes, context.getSourceCode());
 			return problem;
 		},
 	]),
 );
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create: checkVueTemplate(create),
 	meta: {
@@ -130,6 +139,7 @@ module.exports = {
 			description: 'Prefer `RegExp#test()` over `String#match()` and `RegExp#exec()`.',
 		},
 		fixable: 'code',
+		hasSuggestions: true,
 		messages,
 	},
 };

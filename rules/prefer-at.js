@@ -1,6 +1,5 @@
 'use strict';
-const {isOpeningBracketToken, isClosingBracketToken, getStaticValue} = require('eslint-utils');
-const isLiteralValue = require('./utils/is-literal-value.js');
+const {isOpeningBracketToken, isClosingBracketToken, getStaticValue} = require('@eslint-community/eslint-utils');
 const {
 	isParenthesized,
 	getParenthesizedRange,
@@ -14,8 +13,9 @@ const {
 	getNegativeIndexLengthNode,
 	removeLengthNode,
 } = require('./shared/negative-index.js');
-const {methodCallSelector, callExpressionSelector, notLeftHandSideSelector} = require('./selectors/index.js');
+const {methodCallSelector, callExpressionSelector} = require('./selectors/index.js');
 const {removeMemberExpressionProperty, removeMethodCall} = require('./fix/index.js');
+const {isLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID_NEGATIVE_INDEX = 'negative-index';
 const MESSAGE_ID_INDEX = 'index';
@@ -38,10 +38,10 @@ const indexAccess = [
 	'MemberExpression',
 	'[optional!=true]',
 	'[computed!=false]',
-	notLeftHandSideSelector(),
 ].join('');
 const sliceCall = methodCallSelector({method: 'slice', minimumArguments: 1, maximumArguments: 2});
 const stringCharAt = methodCallSelector({method: 'charAt', argumentsLength: 1});
+const isArguments = node => node.type === 'Identifier' && node.name === 'arguments';
 
 const isLiteralNegativeInteger = node =>
 	node.type === 'UnaryExpression'
@@ -56,7 +56,7 @@ const isZeroIndexAccess = node => {
 		&& !parent.optional
 		&& parent.computed
 		&& parent.object === node
-		&& isLiteralValue(parent.property, 0);
+		&& isLiteral(parent.property, 0);
 };
 
 const isArrayPopOrShiftCall = (node, method) => {
@@ -149,6 +149,10 @@ function create(context) {
 
 	return {
 		[indexAccess](node) {
+			if (isLeftHandSide(node)) {
+				return;
+			}
+
 			const indexNode = node.property;
 			const lengthNode = getNegativeIndexLengthNode(indexNode, node.object);
 
@@ -158,27 +162,53 @@ function create(context) {
 				}
 
 				// Only if we are sure it's an positive integer
-				const staticValue = getStaticValue(indexNode, context.getScope());
+				const staticValue = getStaticValue(indexNode, sourceCode.getScope(indexNode));
 				if (!staticValue || !Number.isInteger(staticValue.value) || staticValue.value < 0) {
 					return;
 				}
 			}
 
-			return {
+			const problem = {
 				node: indexNode,
 				messageId: lengthNode ? MESSAGE_ID_NEGATIVE_INDEX : MESSAGE_ID_INDEX,
-				* fix(fixer) {
-					if (lengthNode) {
-						yield removeLengthNode(lengthNode, fixer, sourceCode);
-					}
-
-					const openingBracketToken = sourceCode.getTokenBefore(indexNode, isOpeningBracketToken);
-					yield fixer.replaceText(openingBracketToken, '.at(');
-
-					const isClosingBraceToken = sourceCode.getTokenAfter(indexNode, isClosingBracketToken);
-					yield fixer.replaceText(isClosingBraceToken, ')');
-				},
 			};
+
+			if (isArguments(node.object)) {
+				return problem;
+			}
+
+			problem.fix = function * (fixer) {
+				if (lengthNode) {
+					yield removeLengthNode(lengthNode, fixer, sourceCode);
+				}
+
+				// Only remove space for `foo[foo.length - 1]`
+				if (
+					indexNode.type === 'BinaryExpression'
+					&& indexNode.operator === '-'
+					&& indexNode.left === lengthNode
+					&& indexNode.right.type === 'Literal'
+					&& /^\d+$/.test(indexNode.right.raw)
+				) {
+					const numberNode = indexNode.right;
+					const tokenBefore = sourceCode.getTokenBefore(numberNode);
+					if (
+						tokenBefore.type === 'Punctuator'
+						&& tokenBefore.value === '-'
+						&& /^\s+$/.test(sourceCode.text.slice(tokenBefore.range[1], numberNode.range[0]))
+					) {
+						yield fixer.removeRange([tokenBefore.range[1], numberNode.range[0]]);
+					}
+				}
+
+				const openingBracketToken = sourceCode.getTokenBefore(indexNode, isOpeningBracketToken);
+				yield fixer.replaceText(openingBracketToken, '.at(');
+
+				const closingBracketToken = sourceCode.getTokenAfter(indexNode, isClosingBracketToken);
+				yield fixer.replaceText(closingBracketToken, ')');
+			};
+
+			return problem;
 		},
 		[stringCharAt](node) {
 			const [indexNode] = node.arguments;
@@ -251,32 +281,39 @@ function create(context) {
 				return;
 			}
 
-			return {
+			const problem = {
 				node: node.callee,
 				messageId: MESSAGE_ID_GET_LAST_FUNCTION,
 				data: {description: matchedFunction.trim()},
-				fix(fixer) {
-					const [array] = node.arguments;
-
-					let fixed = getParenthesizedText(array, sourceCode);
-
-					if (
-						!isParenthesized(array, sourceCode)
-						&& shouldAddParenthesesToMemberExpressionObject(array, sourceCode)
-					) {
-						fixed = `(${fixed})`;
-					}
-
-					fixed = `${fixed}.at(-1)`;
-
-					const tokenBefore = sourceCode.getTokenBefore(node);
-					if (needsSemicolon(tokenBefore, sourceCode, fixed)) {
-						fixed = `;${fixed}`;
-					}
-
-					return fixer.replaceText(node, fixed);
-				},
 			};
+
+			const [array] = node.arguments;
+
+			if (isArguments(array)) {
+				return problem;
+			}
+
+			problem.fix = function (fixer) {
+				let fixed = getParenthesizedText(array, sourceCode);
+
+				if (
+					!isParenthesized(array, sourceCode)
+					&& shouldAddParenthesesToMemberExpressionObject(array, sourceCode)
+				) {
+					fixed = `(${fixed})`;
+				}
+
+				fixed = `${fixed}.at(-1)`;
+
+				const tokenBefore = sourceCode.getTokenBefore(node);
+				if (needsSemicolon(tokenBefore, sourceCode, fixed)) {
+					fixed = `;${fixed}`;
+				}
+
+				return fixer.replaceText(node, fixed);
+			};
+
+			return problem;
 		},
 	};
 }
@@ -284,6 +321,7 @@ function create(context) {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			getLastElementFunctions: {
 				type: 'array',
@@ -294,10 +332,10 @@ const schema = [
 				default: false,
 			},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -306,8 +344,8 @@ module.exports = {
 			description: 'Prefer `.at()` method for index access and `String#charAt()`.',
 		},
 		fixable: 'code',
+		hasSuggestions: true,
 		schema,
 		messages,
-		hasSuggestions: true,
 	},
 };

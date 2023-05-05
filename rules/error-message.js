@@ -1,5 +1,6 @@
 'use strict';
-const {getStaticValue} = require('eslint-utils');
+const {getStaticValue} = require('@eslint-community/eslint-utils');
+const isShadowed = require('./utils/is-shadowed.js');
 const {callOrNewExpressionSelector} = require('./selectors/index.js');
 
 const MESSAGE_ID_MISSING_MESSAGE = 'missing-message';
@@ -24,8 +25,14 @@ const selector = callOrNewExpressionSelector([
 	'AggregateError',
 ]);
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
 	[selector](expression) {
+		const scope = context.getSourceCode().getScope(expression);
+		if (isShadowed(scope, expression.callee)) {
+			return;
+		}
+
 		const constructorName = expression.callee.name;
 		const messageArgumentIndex = constructorName === 'AggregateError' ? 1 : 0;
 		const callArguments = expression.arguments;
@@ -53,7 +60,7 @@ const create = context => ({
 			};
 		}
 
-		const staticResult = getStaticValue(node, context.getScope());
+		const staticResult = getStaticValue(node, scope);
 
 		// We don't know the value of `message`
 		if (!staticResult) {
@@ -77,6 +84,7 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

@@ -1,5 +1,5 @@
 'use strict';
-const {findVariable} = require('eslint-utils');
+const {findVariable} = require('@eslint-community/eslint-utils');
 const avoidCapture = require('./utils/avoid-capture.js');
 const {renameVariable} = require('./fix/index.js');
 const {matches, methodCallSelector} = require('./selectors/index.js');
@@ -32,6 +32,7 @@ const selector = matches([
 	].join(''),
 ]);
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const options = {
 		name: 'error',
@@ -49,7 +50,7 @@ const create = context => {
 		|| name.endsWith(expectedName.charAt(0).toUpperCase() + expectedName.slice(1));
 
 	return {
-		[selector]: node => {
+		[selector](node) {
 			const originalName = node.name;
 
 			if (
@@ -59,12 +60,12 @@ const create = context => {
 				return;
 			}
 
-			const scope = context.getScope();
+			const scope = context.getSourceCode().getScope(node);
 			const variable = findVariable(scope, node);
 
 			// This was reported https://github.com/sindresorhus/eslint-plugin-unicorn/issues/1075#issuecomment-768072967
 			// But can't reproduce, just ignore this case
-			/* istanbul ignore next */
+			/* c8 ignore next 3 */
 			if (!variable) {
 				return;
 			}
@@ -100,6 +101,7 @@ const create = context => {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			name: {
 				type: 'string',
@@ -112,6 +114,7 @@ const schema = [
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

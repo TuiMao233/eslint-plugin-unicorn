@@ -1,5 +1,5 @@
 'use strict';
-const {hasSideEffect, isCommaToken, isSemicolonToken} = require('eslint-utils');
+const {hasSideEffect, isCommaToken, isSemicolonToken} = require('@eslint-community/eslint-utils');
 const {methodCallSelector} = require('./selectors/index.js');
 const getCallExpressionArgumentsText = require('./utils/get-call-expression-arguments-text.js');
 const isSameReference = require('./utils/is-same-reference.js');
@@ -34,7 +34,7 @@ function getFirstExpression(node, sourceCode) {
 		}
 	}
 
-	/* istanbul ignore next */
+	/* c8 ignore next */
 	throw new Error('Cannot find the first `Array#push()` call.\nPlease open an issue at https://github.com/sindresorhus/eslint-plugin-unicorn/issues/new?title=%60no-array-push-push%60%3A%20Cannot%20find%20first%20%60push()%60');
 }
 
@@ -43,7 +43,15 @@ function create(context) {
 		ignore: [],
 		...context.options[0],
 	};
-	const ignoredObjects = ['stream', 'this', 'this.stream', ...ignore];
+	const ignoredObjects = [
+		'stream',
+		'this',
+		'this.stream',
+		'process.stdin',
+		'process.stdout',
+		'process.stderr',
+		...ignore,
+	];
 	const sourceCode = context.getSourceCode();
 
 	return {
@@ -110,16 +118,17 @@ function create(context) {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			ignore: {
 				type: 'array',
 				uniqueItems: true,
 			},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -128,8 +137,8 @@ module.exports = {
 			description: 'Enforce combining multiple `Array#push()` into one call.',
 		},
 		fixable: 'code',
+		hasSuggestions: true,
 		schema,
 		messages,
-		hasSuggestions: true,
 	},
 };

@@ -1,28 +1,32 @@
 'use strict';
 const {
 	isParenthesized,
-	isArrowToken,
 	isCommaToken,
 	isSemicolonToken,
 	isClosingParenToken,
 	findVariable,
-} = require('eslint-utils');
+	hasSideEffect,
+} = require('@eslint-community/eslint-utils');
 const {methodCallSelector, referenceIdentifierSelector} = require('./selectors/index.js');
 const {extendFixRange} = require('./fix/index.js');
 const needsSemicolon = require('./utils/needs-semicolon.js');
 const shouldAddParenthesesToExpressionStatementExpression = require('./utils/should-add-parentheses-to-expression-statement-expression.js');
-const {getParentheses} = require('./utils/parentheses.js');
+const shouldAddParenthesesToMemberExpressionObject = require('./utils/should-add-parentheses-to-member-expression-object.js');
+const {getParentheses, getParenthesizedRange} = require('./utils/parentheses.js');
 const isFunctionSelfUsedInside = require('./utils/is-function-self-used-inside.js');
 const {isNodeMatches} = require('./utils/is-node-matches.js');
 const assertToken = require('./utils/assert-token.js');
-const {fixSpaceAroundKeyword} = require('./fix/index.js');
+const {fixSpaceAroundKeyword, removeParentheses} = require('./fix/index.js');
+const {isArrowFunctionBody} = require('./ast/index.js');
 
-const MESSAGE_ID = 'no-array-for-each';
+const MESSAGE_ID_ERROR = 'no-array-for-each/error';
+const MESSAGE_ID_SUGGESTION = 'no-array-for-each/suggestion';
 const messages = {
-	[MESSAGE_ID]: 'Use `for…of` instead of `Array#forEach(…)`.',
+	[MESSAGE_ID_ERROR]: 'Use `for…of` instead of `.forEach(…)`.',
+	[MESSAGE_ID_SUGGESTION]: 'Switch to `for…of`.',
 };
 
-const arrayForEachCallSelector = methodCallSelector({
+const forEachMethodCallSelector = methodCallSelector({
 	method: 'forEach',
 	includeOptionalCall: true,
 	includeOptionalMember: true,
@@ -35,6 +39,11 @@ const continueAbleNodeTypes = new Set([
 	'ForOfStatement',
 	'ForInStatement',
 ]);
+
+const stripChainExpression = node =>
+	(node.parent.type === 'ChainExpression' && node.parent.expression === node)
+		? node.parent
+		: node;
 
 function isReturnStatementInContinueAbleNodes(returnStatement, callbackFunction) {
 	for (let node = returnStatement; node && node !== callbackFunction; node = node.parent) {
@@ -50,8 +59,9 @@ function shouldSwitchReturnStatementToBlockStatement(returnStatement) {
 	const {parent} = returnStatement;
 
 	switch (parent.type) {
-		case 'IfStatement':
+		case 'IfStatement': {
 			return parent.consequent === returnStatement || parent.alternate === returnStatement;
+		}
 
 		// These parent's body need switch to `BlockStatement` too, but since they are "continueAble", won't fix
 		// case 'ForStatement':
@@ -59,11 +69,13 @@ function shouldSwitchReturnStatementToBlockStatement(returnStatement) {
 		// case 'ForOfStatement':
 		// case 'WhileStatement':
 		// case 'DoWhileStatement':
-		case 'WithStatement':
+		case 'WithStatement': {
 			return parent.body === returnStatement;
+		}
 
-		default:
+		default: {
 			return false;
+		}
 	}
 }
 
@@ -71,27 +83,34 @@ function getFixFunction(callExpression, functionInfo, context) {
 	const sourceCode = context.getSourceCode();
 	const [callback] = callExpression.arguments;
 	const parameters = callback.params;
-	const array = callExpression.callee.object;
+	const iterableObject = callExpression.callee.object;
 	const {returnStatements} = functionInfo.get(callback);
+	const isOptionalObject = callExpression.callee.optional;
+	const ancestor = stripChainExpression(callExpression).parent;
+	const objectText = sourceCode.getText(iterableObject);
 
 	const getForOfLoopHeadText = () => {
 		const [elementText, indexText] = parameters.map(parameter => sourceCode.getText(parameter));
-		const useEntries = parameters.length === 2;
+		const shouldUseEntries = parameters.length === 2;
 
 		let text = 'for (';
-		text += isFunctionParameterVariableReassigned(callback, context) ? 'let' : 'const';
+		text += isFunctionParameterVariableReassigned(callback, sourceCode) ? 'let' : 'const';
 		text += ' ';
-		text += useEntries ? `[${indexText}, ${elementText}]` : elementText;
+		text += shouldUseEntries ? `[${indexText}, ${elementText}]` : elementText;
 		text += ' of ';
 
-		let arrayText = sourceCode.getText(array);
-		if (isParenthesized(array, sourceCode)) {
-			arrayText = `(${arrayText})`;
-		}
+		const shouldAddParenthesesToObject
+			= isParenthesized(iterableObject, sourceCode)
+			|| (
+				// `1?.forEach()` -> `(1).entries()`
+				isOptionalObject
+				&& shouldUseEntries
+				&& shouldAddParenthesesToMemberExpressionObject(iterableObject, sourceCode)
+			);
 
-		text += arrayText;
+		text += shouldAddParenthesesToObject ? `(${objectText})` : objectText;
 
-		if (useEntries) {
+		if (shouldUseEntries) {
 			text += '.entries()';
 		}
 
@@ -102,17 +121,7 @@ function getFixFunction(callExpression, functionInfo, context) {
 
 	const getForOfLoopHeadRange = () => {
 		const [start] = callExpression.range;
-		let end;
-		if (callback.body.type === 'BlockStatement') {
-			end = callback.body.range[0];
-		} else {
-			// In this case, parentheses are not included in body location, so we look for `=>` token
-			// foo.forEach(bar => ({bar}))
-			//                     ^
-			const arrowToken = sourceCode.getTokenBefore(callback.body, isArrowToken);
-			end = arrowToken.range[1];
-		}
-
+		const [end] = getParenthesizedRange(callback.body, sourceCode);
 		return [start, end];
 	};
 
@@ -193,9 +202,14 @@ function getFixFunction(callExpression, functionInfo, context) {
 	}
 
 	return function * (fixer) {
+		// `(( foo.forEach(bar => bar) ))`
+		yield * removeParentheses(callExpression, fixer, sourceCode);
+
 		// Replace these with `for (const … of …) `
 		// foo.forEach(bar =>    bar)
-		// ^^^^^^^^^^^^^^^^^^ (space after `=>` didn't included)
+		// ^^^^^^^^^^^^^^^^^^^^^^
+		// foo.forEach(bar =>    (bar))
+		// ^^^^^^^^^^^^^^^^^^^^^^
 		// foo.forEach(bar =>    {})
 		// ^^^^^^^^^^^^^^^^^^^^^^
 		// foo.forEach(function(bar)    {})
@@ -228,15 +242,24 @@ function getFixFunction(callExpression, functionInfo, context) {
 			yield * replaceReturnStatement(returnStatement, fixer);
 		}
 
-		const expressionStatementLastToken = sourceCode.getLastToken(callExpression.parent);
-		// Remove semicolon if it's not needed anymore
-		// foo.forEach(bar => {});
-		//                       ^
-		if (shouldRemoveExpressionStatementLastToken(expressionStatementLastToken)) {
-			yield fixer.remove(expressionStatementLastToken, fixer);
+		if (ancestor.type === 'ExpressionStatement') {
+			const expressionStatementLastToken = sourceCode.getLastToken(ancestor);
+			// Remove semicolon if it's not needed anymore
+			// foo.forEach(bar => {});
+			//                       ^
+			if (shouldRemoveExpressionStatementLastToken(expressionStatementLastToken)) {
+				yield fixer.remove(expressionStatementLastToken, fixer);
+			}
+		} else if (ancestor.type === 'ArrowFunctionExpression') {
+			yield fixer.insertTextBefore(callExpression, '{ ');
+			yield fixer.insertTextAfter(callExpression, ' }');
 		}
 
 		yield * fixSpaceAroundKeyword(fixer, callExpression.parent, sourceCode);
+
+		if (isOptionalObject) {
+			yield fixer.insertTextBefore(callExpression, `if (${objectText}) `);
+		}
 
 		// Prevent possible variable conflicts
 		yield * extendFixRange(fixer, callExpression.parent.range);
@@ -253,8 +276,8 @@ const isChildScope = (child, parent) => {
 	return false;
 };
 
-function isFunctionParametersSafeToFix(callbackFunction, {context, scope, array, allIdentifiers}) {
-	const variables = context.getDeclaredVariables(callbackFunction);
+function isFunctionParametersSafeToFix(callbackFunction, {sourceCode, scope, callExpression, allIdentifiers}) {
+	const variables = sourceCode.getDeclaredVariables(callbackFunction);
 
 	for (const variable of variables) {
 		if (variable.defs.length !== 1) {
@@ -267,13 +290,13 @@ function isFunctionParametersSafeToFix(callbackFunction, {context, scope, array,
 		}
 
 		const variableName = definition.name.name;
-		const [arrayStart, arrayEnd] = array.range;
+		const [callExpressionStart, callExpressionEnd] = callExpression.range;
 		for (const identifier of allIdentifiers) {
 			const {name, range: [start, end]} = identifier;
 			if (
 				name !== variableName
-				|| start < arrayStart
-				|| end > arrayEnd
+				|| start < callExpressionStart
+				|| end > callExpressionEnd
 			) {
 				continue;
 			}
@@ -288,39 +311,26 @@ function isFunctionParametersSafeToFix(callbackFunction, {context, scope, array,
 	return true;
 }
 
-function isFunctionParameterVariableReassigned(callbackFunction, context) {
-	return context.getDeclaredVariables(callbackFunction)
+function isFunctionParameterVariableReassigned(callbackFunction, sourceCode) {
+	return sourceCode.getDeclaredVariables(callbackFunction)
 		.filter(variable => variable.defs[0].type === 'Parameter')
-		.some(variable => {
-			const {references} = variable;
-			return references.some(reference => {
-				const node = reference.identifier;
-				const {parent} = node;
-				return parent.type === 'UpdateExpression'
-					|| (parent.type === 'AssignmentExpression' && parent.left === node);
-			});
-		});
+		.some(variable =>
+			variable.references.some(reference => !reference.init && reference.isWrite()),
+		);
 }
 
-function isFixable(callExpression, {scope, functionInfo, allIdentifiers, context}) {
-	const sourceCode = context.getSourceCode();
+function isFixable(callExpression, {scope, functionInfo, allIdentifiers, sourceCode}) {
 	// Check `CallExpression`
+	if (callExpression.optional || callExpression.arguments.length !== 1) {
+		return false;
+	}
+
+	// Check ancestors, we only fix `ExpressionStatement`
+	const callOrChainExpression = stripChainExpression(callExpression);
 	if (
-		callExpression.optional
-		|| isParenthesized(callExpression, sourceCode)
-		|| callExpression.arguments.length !== 1
+		callOrChainExpression.parent.type !== 'ExpressionStatement'
+		&& !isArrowFunctionBody(callOrChainExpression)
 	) {
-		return false;
-	}
-
-	// Check `CallExpression.parent`
-	if (callExpression.parent.type !== 'ExpressionStatement') {
-		return false;
-	}
-
-	// Check `CallExpression.callee`
-	/* istanbul ignore next: Because of `ChainExpression` wrapper, `foo?.forEach()` is already failed on previous check, keep this just for safety */
-	if (callExpression.callee.optional) {
 		return false;
 	}
 
@@ -339,8 +349,12 @@ function isFixable(callExpression, {scope, functionInfo, allIdentifiers, context
 	const parameters = callback.params;
 	if (
 		!(parameters.length === 1 || parameters.length === 2)
+		// `array.forEach((element = defaultValue) => {})`
+		|| (parameters.length === 1 && parameters[0].type === 'AssignmentPattern')
+		// https://github.com/sindresorhus/eslint-plugin-unicorn/issues/1814
+		|| (parameters.length === 2 && parameters[1].type !== 'Identifier')
 		|| parameters.some(({type, typeAnnotation}) => type === 'RestElement' || typeAnnotation)
-		|| !isFunctionParametersSafeToFix(callback, {scope, array: callExpression, allIdentifiers, context})
+		|| !isFunctionParametersSafeToFix(callback, {scope, callExpression, allIdentifiers, sourceCode})
 	) {
 		return false;
 	}
@@ -361,20 +375,25 @@ function isFixable(callExpression, {scope, functionInfo, allIdentifiers, context
 const ignoredObjects = [
 	'React.Children',
 	'Children',
+	'R',
+	// https://www.npmjs.com/package/p-iteration
+	'pIteration',
 ];
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const functionStack = [];
 	const callExpressions = [];
 	const allIdentifiers = [];
 	const functionInfo = new Map();
+	const sourceCode = context.getSourceCode();
 
 	return {
 		':function'(node) {
 			functionStack.push(node);
 			functionInfo.set(node, {
 				returnStatements: [],
-				scope: context.getScope(),
+				scope: sourceCode.getScope(node),
 			});
 		},
 		':function:exit'() {
@@ -388,25 +407,42 @@ const create = context => {
 			const {returnStatements} = functionInfo.get(currentFunction);
 			returnStatements.push(node);
 		},
-		[arrayForEachCallSelector](node) {
+		[forEachMethodCallSelector](node) {
 			if (isNodeMatches(node.callee.object, ignoredObjects)) {
 				return;
 			}
 
 			callExpressions.push({
 				node,
-				scope: context.getScope(),
+				scope: sourceCode.getScope(node),
 			});
 		},
 		* 'Program:exit'() {
 			for (const {node, scope} of callExpressions) {
+				const iterable = node.callee;
+
 				const problem = {
-					node: node.callee.property,
-					messageId: MESSAGE_ID,
+					node: iterable.property,
+					messageId: MESSAGE_ID_ERROR,
 				};
 
-				if (isFixable(node, {scope, allIdentifiers, functionInfo, context})) {
-					problem.fix = getFixFunction(node, functionInfo, context);
+				if (!isFixable(node, {scope, allIdentifiers, functionInfo, sourceCode})) {
+					yield problem;
+					continue;
+				}
+
+				const shouldUseSuggestion = iterable.optional && hasSideEffect(iterable, sourceCode);
+				const fix = getFixFunction(node, functionInfo, context);
+
+				if (shouldUseSuggestion) {
+					problem.suggest = [
+						{
+							messageId: MESSAGE_ID_SUGGESTION,
+							fix,
+						},
+					];
+				} else {
+					problem.fix = fix;
 				}
 
 				yield problem;
@@ -415,14 +451,16 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
 		type: 'suggestion',
 		docs: {
-			description: 'Prefer `for…of` over `Array#forEach(…)`.',
+			description: 'Prefer `for…of` over the `forEach` method.',
 		},
 		fixable: 'code',
+		hasSuggestions: true,
 		messages,
 	},
 };

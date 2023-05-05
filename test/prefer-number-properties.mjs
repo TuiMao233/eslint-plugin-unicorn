@@ -3,9 +3,8 @@ import {getTester} from './utils/test.mjs';
 
 const {test} = getTester(import.meta);
 
-const METHOD_ERROR_MESSAGE_ID = 'method-error';
-const METHOD_SUGGESTION_MESSAGE_ID = 'method-suggestion';
-const PROPERTY_ERROR_MESSAGE_ID = 'property-error';
+const MESSAGE_ID_ERROR = 'error';
+const MESSAGE_ID_SUGGESTION = 'suggestion';
 
 const methods = {
 	parseInt: {
@@ -30,17 +29,19 @@ const createError = (name, suggestionOutput) => {
 	const {safe} = methods[name];
 
 	const error = {
-		messageId: METHOD_ERROR_MESSAGE_ID,
+		messageId: MESSAGE_ID_ERROR,
 		data: {
-			name,
+			description: name,
+			property: name,
 		},
 	};
 
 	const suggestions = safe ? undefined : [
 		{
-			messageId: METHOD_SUGGESTION_MESSAGE_ID,
+			messageId: MESSAGE_ID_SUGGESTION,
 			data: {
-				name,
+				description: name,
+				property: name,
 			},
 			output: suggestionOutput,
 		},
@@ -75,12 +76,6 @@ test({
 		'Number.isNaN(10);',
 		'Number.isFinite(10);',
 
-		// Not call
-		...Object.keys(methods),
-
-		// New
-		...Object.values(methods).map(({code}) => `new ${code}`),
-
 		// Shadowed
 		...Object.entries(methods).map(([name, {code}]) => outdent`
 			const ${name} = function() {};
@@ -96,6 +91,24 @@ test({
 				return ${code}
 			}
 		`),
+
+		// Not read
+		'global.isFinite = Number.isFinite;',
+		'global.isFinite ??= 1;',
+		'isFinite ||= 1;',
+		'[global.isFinite] = [];',
+		'[global.isFinite = 1] = [];',
+		'[[global.isFinite = 1]] = [];',
+		'[isFinite] = [];',
+		'[isFinite = 1] = [];',
+		'[[isFinite = 1]] = [];',
+		'({foo: global.isFinite} = {});',
+		'({foo: global.isFinite = 1} = {});',
+		'({foo: {bar: global.isFinite = 1}} = {});',
+		'({foo: isFinite} = {});',
+		'({foo: isFinite = 1} = {});',
+		'({foo: {bar: isFinite = 1}} = {});',
+		'delete global.isFinite;',
 	],
 
 	invalid: [
@@ -161,17 +174,14 @@ test({
 // `NaN` and `Infinity`
 const errorNaN = [
 	{
-		messageId: PROPERTY_ERROR_MESSAGE_ID,
+		messageId: MESSAGE_ID_ERROR,
 		data: {
-			identifier: 'NaN',
+			description: 'NaN',
 			property: 'NaN',
 		},
 	},
 ];
 
-// TODO: Add following tests whenESLint support `proposal-class-fields`
-// 'class Foo {NaN = 1}',
-// 'class Foo {[NaN] = 1}',
 test({
 	valid: [
 		'const foo = Number.NaN;',
@@ -202,6 +212,9 @@ test({
 		'class NaN {}',
 		'const Foo = class NaN {}',
 		'class Foo {NaN(){}}',
+		'class Foo {#NaN(){}}',
+		'class Foo3 {NaN = 1}',
+		'class Foo {#NaN = 1}',
 		outdent`
 			NaN: for (const foo of bar) {
 				if (a) {
@@ -289,6 +302,11 @@ test({
 			output: 'const foo = Number.NaN.toString();',
 			errors: errorNaN,
 		},
+		{
+			code: 'class Foo3 {[NaN] = 1}',
+			output: 'class Foo3 {[Number.NaN] = 1}',
+			errors: errorNaN,
+		},
 	],
 });
 
@@ -341,7 +359,11 @@ test.typescript({
 });
 
 test.snapshot({
-	valid: [],
+	valid: [
+		'const foo = ++Infinity;',
+		'const foo = --Infinity;',
+		'const foo = -(--Infinity);',
+	],
 	invalid: [
 		'const foo = {[NaN]: 1}',
 		'const foo = {[NaN]() {}}',
@@ -364,12 +386,9 @@ test.snapshot({
 		'const foo = -Infinity.toString();',
 		'const foo = (-Infinity).toString();',
 		'const foo = +Infinity;',
-		'const foo = ++Infinity;',
 		'const foo = +-Infinity;',
 		'const foo = -Infinity;',
-		'const foo = --Infinity;',
 		'const foo = -(-Infinity);',
-		'const foo = -(--Infinity);',
 		'const foo = 1 - Infinity;',
 		'const foo = 1 - -Infinity;',
 		'const isPositiveZero = value => value === 0 && 1 / value === Infinity;',
@@ -384,5 +403,26 @@ test.snapshot({
 
 		// Space after keywords
 		'function foo() {return-Infinity}',
+
+		'globalThis.isNaN(foo);',
+		'global.isNaN(foo);',
+		'window.isNaN(foo);',
+		'self.isNaN(foo);',
+		'globalThis.parseFloat(foo);',
+		'global.parseFloat(foo);',
+		'window.parseFloat(foo);',
+		'self.parseFloat(foo);',
+		'globalThis.NaN',
+		'-globalThis.Infinity',
+
+		// Not a call
+		outdent`
+			const options = {
+				normalize: parseFloat,
+				parseInt,
+			};
+
+			run(foo, options);
+		`,
 	],
 });

@@ -1,7 +1,8 @@
 'use strict';
-const {isParenthesized} = require('eslint-utils');
+const {isParenthesized} = require('@eslint-community/eslint-utils');
 const eventTypes = require('./shared/dom-events.js');
 const {STATIC_REQUIRE_SOURCE_SELECTOR} = require('./selectors/index.js');
+const {isUndefined, isNullLiteral} = require('./ast/index.js');
 
 const MESSAGE_ID = 'prefer-add-event-listener';
 const messages = {
@@ -10,6 +11,7 @@ const messages = {
 const extraMessages = {
 	beforeunload: 'Use `event.preventDefault(); event.returnValue = \'foo\'` to trigger the prompt.',
 	message: 'Note that there is difference between `SharedWorker#onmessage` and `SharedWorker#addEventListener(\'message\')`.',
+	error: 'Note that there is difference between `{window,element}.onerror` and `{window,element}.addEventListener(\'error\')`.',
 };
 
 const getEventMethodName = memberExpression => memberExpression.property.name;
@@ -46,18 +48,9 @@ const shouldFixBeforeUnload = (assignedExpression, nodeReturnsSomething) => {
 	return !nodeReturnsSomething.get(assignedExpression);
 };
 
-const isClearing = node => {
-	if (node.type === 'Literal') {
-		return node.raw === 'null';
-	}
+const isClearing = node => isUndefined(node) || isNullLiteral(node);
 
-	if (node.type === 'Identifier') {
-		return node.name === 'undefined';
-	}
-
-	return false;
-};
-
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const options = context.options[0] || {};
 	const excludedPackages = new Set(options.excludedPackages || ['koa', 'sax']);
@@ -101,7 +94,7 @@ const create = context => {
 				return;
 			}
 
-			const {left: memberExpression, right: assignedExpression} = node;
+			const {left: memberExpression, right: assignedExpression, operator} = node;
 
 			if (
 				memberExpression.type !== 'MemberExpression'
@@ -136,7 +129,14 @@ const create = context => {
 			} else if (eventTypeName === 'message') {
 				// Disable `onmessage` fix, see #537
 				extra = extraMessages.message;
-			} else {
+			} else if (eventTypeName === 'error') {
+				// Disable `onerror` fix, see #1493
+				extra = extraMessages.error;
+			} else if (
+				operator === '='
+				&& node.parent.type === 'ExpressionStatement'
+				&& node.parent.expression === node
+			) {
 				fix = fixer => fixCode(fixer, context.getSourceCode(), node, memberExpression);
 			}
 
@@ -157,6 +157,7 @@ const create = context => {
 const schema = [
 	{
 		type: 'object',
+		additionalProperties: false,
 		properties: {
 			excludedPackages: {
 				type: 'array',
@@ -166,10 +167,10 @@ const schema = [
 				uniqueItems: true,
 			},
 		},
-		additionalProperties: false,
 	},
 ];
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

@@ -1,10 +1,13 @@
 import {createRequire} from 'node:module';
-import {Linter, SourceCodeFixer} from 'eslint/lib/linter/index.js';
+import {Linter} from 'eslint';
 import {codeFrameColumns} from '@babel/code-frame';
 import outdent from 'outdent';
 
 const require = createRequire(import.meta.url);
 const codeFrameColumnsOptions = {linesAbove: Number.POSITIVE_INFINITY, linesBelow: Number.POSITIVE_INFINITY};
+// A simple version of `SourceCodeFixer.applyFixes`
+// https://github.com/eslint/eslint/issues/14936#issuecomment-906746754
+const applyFix = (code, {fix}) => `${code.slice(0, fix.range[0])}${fix.text}${code.slice(fix.range[1])}`;
 
 function visualizeRange(text, location, message) {
 	return codeFrameColumns(
@@ -59,7 +62,7 @@ function normalizeTests(tests) {
 
 			const additionalProperties = getAdditionalProperties(
 				testCase,
-				['code', 'options', 'filename', 'parserOptions', 'parser'],
+				['code', 'options', 'filename', 'parserOptions', 'parser', 'globals'],
 			);
 
 			if (additionalProperties.length > 0) {
@@ -76,6 +79,8 @@ function getVerifyConfig(ruleId, testerConfig, testCase) {
 		options,
 		parserOptions,
 		parser = testerConfig.parser,
+		env,
+		globals,
 	} = testCase;
 
 	return {
@@ -84,6 +89,14 @@ function getVerifyConfig(ruleId, testerConfig, testCase) {
 		parserOptions: {
 			...testerConfig.parserOptions,
 			...parserOptions,
+		},
+		env: {
+			...testerConfig.env,
+			...env,
+		},
+		globals: {
+			...testerConfig.globals,
+			...globals,
 		},
 		rules: {
 			[ruleId]: ['error', ...(Array.isArray(options) ? options : [])],
@@ -108,6 +121,24 @@ function defineParser(linter, parser) {
 
 	defined.add(parser);
 	linter.defineParser(parser, require(parser));
+}
+
+function verify(linter, code, verifyConfig, {filename}) {
+	const messages = linter.verify(code, verifyConfig, {filename});
+
+	// Missed `message`, #1923
+	const invalidMessage = messages.find(({message}) => typeof message !== 'string');
+	if (invalidMessage) {
+		throw Object.assign(new Error('Unexpected message.'), {eslintMessage: invalidMessage});
+	}
+
+	const fatalError = messages.find(({fatal}) => fatal);
+	if (fatalError) {
+		const {line, column, message} = fatalError;
+		throw new SyntaxError('\n' + codeFrameColumns(code, {start: {line, column}}, {message}));
+	}
+
+	return messages;
 }
 
 class SnapshotRuleTester {
@@ -135,8 +166,8 @@ class SnapshotRuleTester {
 					${indentCode(printCode(code))}
 				`,
 				t => {
-					const messages = linter.verify(code, verifyConfig, {filename});
-					t.deepEqual(messages, [], 'Valid case should not has errors.');
+					const messages = verify(linter, code, verifyConfig, {filename});
+					t.deepEqual(messages, [], 'Valid case should not have errors.');
 				},
 			);
 		}
@@ -145,6 +176,7 @@ class SnapshotRuleTester {
 			const {code, options, filename} = testCase;
 			const verifyConfig = getVerifyConfig(ruleId, config, testCase);
 			defineParser(linter, verifyConfig.parser);
+			const runVerify = code => verify(linter, code, verifyConfig, {filename});
 
 			test(
 				outdent`
@@ -152,13 +184,8 @@ class SnapshotRuleTester {
 					${indentCode(printCode(code))}
 				`,
 				t => {
-					const messages = linter.verify(code, verifyConfig, {filename});
-					t.notDeepEqual(messages, [], 'Invalid case should has at least one error.');
-
-					const fatalError = messages.find(({fatal}) => fatal);
-					if (fatalError) {
-						throw fatalError;
-					}
+					const messages = runVerify(code);
+					t.notDeepEqual(messages, [], 'Invalid case should have at least one error.');
 
 					const {fixed, output} = fixable ? linter.verifyAndFix(code, verifyConfig, {filename}) : {fixed: false};
 
@@ -171,6 +198,7 @@ class SnapshotRuleTester {
 					}
 
 					if (fixable && fixed) {
+						runVerify(output);
 						t.snapshot(`\n${printCode(output)}\n`, 'Output');
 					}
 
@@ -178,13 +206,11 @@ class SnapshotRuleTester {
 						let messageForSnapshot = visualizeEslintMessage(code, message);
 
 						const {suggestions = []} = message;
-						if (suggestions.length > 0 && rule.meta.hasSuggestions !== true) {
-							// This check will no longer be necessary if this change lands in ESLint 8: https://github.com/eslint/eslint/issues/14312
-							throw new Error('Rule with suggestion is missing `meta.hasSuggestions`.');
-						}
 
 						for (const [index, suggestion] of suggestions.entries()) {
-							const {output} = SourceCodeFixer.applyFixes(code, [suggestion]);
+							const output = applyFix(code, suggestion);
+							runVerify(output);
+
 							messageForSnapshot += outdent`
 								\n
 								${'-'.repeat(80)}

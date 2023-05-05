@@ -39,15 +39,15 @@ test.snapshot({
 		'Array.from();',
 		'Array.from(foo, mapFn, thisArg, extra);',
 		'Array.from(...argumentsArray);',
+		'Array.from(set, mapFn).reduce(() => {});',
+		'Array.from(set, mapFn, thisArg).reduce(() => {});',
+		'Array.from(set, () => {}, thisArg).reduce(() => {});',
 		// FirstArgument is `ObjectExpression`
 		'Array.from({length: 10});',
 	],
 	invalid: [
 		'const x = Array.from(set);',
 		'Array.from(set).map(() => {});',
-		'Array.from(set, mapFn).reduce(() => {});',
-		'Array.from(set, mapFn, thisArg).reduce(() => {});',
-		'Array.from(set, () => {}, thisArg).reduce(() => {});',
 		'Array.from(new Set([1, 2])).map(() => {});',
 		'Array.from(document.querySelectorAll("*")).map(() => {});',
 
@@ -140,24 +140,10 @@ test.snapshot({
 		'(Array).from((0, foo))',
 		'(Array.from)((0, foo))',
 		'((Array).from)((0, foo))',
-		'(Array).from(foo, bar)',
-		'(Array.from)(foo, bar)',
-		'((Array).from)(foo, bar)',
-		'(Array).from((0, foo), bar)',
-		'(Array.from)((0, foo), bar)',
-		'((Array).from)((0, foo), bar)',
-		'(Array).from(foo, bar, baz)',
-		'(Array.from)(foo, bar, baz)',
-		'((Array).from)(foo, bar, baz)',
-		'(Array).from((0, foo), bar, baz)',
-		'(Array.from)((0, foo), bar, baz)',
-		'((Array).from)((0, foo), bar, baz)',
-		'Array.from(a, (0, bar), (0, baz),)',
 		'Array.from(a ? b : c)',
-		'Array.from([...a, ...b], b, c)',
+		'Array.from([...a, ...b], )',
 		'Array.from([1])',
 		'Array.from([...a, ...b])',
-		'/* 1 */ Array /* 2 */ .from /* 3 */ ( /* 4 */ a /* 5 */, /* 6 */ b /* 7 */, /* 8 */ c /* 9 */,)',
 		'/* 1 */ Array /* 2 */ .from /* 3 */ ( /* 4 */ a /* 5 */,)',
 	],
 });
@@ -180,6 +166,11 @@ test.snapshot({
 		'Foo.concat(1)',
 		'FooBar.concat(1)',
 		'global.Buffer.concat([])',
+		// #1809
+		'["1", "2"].join(",").concat("...")',
+		'foo.join(",").concat("...")',
+		'foo.join().concat(bar)',
+		'(a + b).concat(c)',
 	],
 	invalid: [
 		'[1].concat(2)',
@@ -281,13 +272,15 @@ test.snapshot({
 		'do foo.concat(1); while (test)',
 		{
 			code: 'with (foo) foo.concat(1)',
-			parserOptions: {ecmaVersion: 5, sourceType: 'script'},
+			parserOptions: {ecmaVersion: 6, sourceType: 'script'},
 		},
 		// Code from example in docs
 		outdent`
 			const baz = [2];
 			call(foo, ...[bar].concat(baz));
 		`,
+		// This not considered `Array#join()` since there are more than one argument
+		'foo.join(foo, bar).concat("...")',
 	],
 });
 
@@ -337,5 +330,87 @@ test.snapshot({
 		'array.slice(0b0)',
 		'array.slice(0.00)',
 		'array.slice(0.00, )',
+	],
+});
+
+// `Array#toSpliced`
+test.snapshot({
+	valid: [
+		'new Array.toSpliced()',
+		'toSpliced()',
+		'array[toSpliced]()',
+		'array.toSpliced',
+		'array.toSpliced(0)',
+		'array.toSpliced(...[])',
+		'array.toSpliced(...[0])',
+		'array.toSpliced(0 + 0)',
+		'array.toSpliced("")',
+		'array.toSpliced(null)',
+		'const ZERO = 0;array.toSpliced(0, ZERO)',
+		'array.toSpliced(0, array.length)',
+		'array.toSpliced(0, 0)',
+		'array.notToSpliced()',
+		// Why would someone write these
+		'[...foo].toSpliced()',
+		'[foo].toSpliced()',
+		'array.toSpliced(100, 0)',
+		'array.toSpliced(-1, 0)',
+	],
+	invalid: [
+		'array.toSpliced()',
+		'array.toSpliced().toSpliced()',
+		'const copy = array.toSpliced()',
+		'(( (( (( array )).toSpliced ))() ))',
+		// Semicolon
+		outdent`
+			bar()
+			foo.toSpliced()
+		`,
+		// `{String,TypedArray}#toSpliced` are wrongly detected
+		'"".toSpliced()',
+		'new Uint8Array([10, 20, 30, 40, 50]).toSpliced()',
+	],
+});
+
+// `String#slice('')`
+test.snapshot({
+	valid: [
+		'new foo.split("")',
+		'split("")',
+		'string[split]("")',
+		'string.split',
+		'string.split(1)',
+		'string.split(..."")',
+		'string.split(...[""])',
+		'string.split("" + "")',
+		'string.split(0)',
+		'string.split(false)',
+		'string.split(undefined)',
+		'string.split(0n)',
+		'string.split(null)',
+		'string.split(/""/)',
+		'string.split(``)',
+		'const EMPTY_STRING = ""; string.split(EMPTY_STRING)',
+		'string.split("", limit)',
+		'"".split(string)',
+		'string.split()',
+		'string.notSplit("")',
+		'const notString = 0; notString.split("")',
+	],
+	invalid: [
+		'"string".split("")',
+		'"string".split(\'\')',
+		'unknown.split("")',
+		'const characters = "string".split("")',
+		'(( (( (( "string" )).split ))( (("")) ) ))',
+		// Semicolon
+		outdent`
+			bar()
+			foo.split("")
+		`,
+		'unknown.split("")',
+		// Not result the same
+		'"🦄".split("")',
+		'const {length} = "🦄".split("")',
 	],
 });

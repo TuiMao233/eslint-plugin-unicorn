@@ -1,5 +1,5 @@
 'use strict';
-const {isOpeningParenToken, isClosingParenToken} = require('eslint-utils');
+const {isOpeningParenToken, isClosingParenToken} = require('@eslint-community/eslint-utils');
 const assertToken = require('./utils/assert-token.js');
 
 const MESSAGE_ID_WITH_NAME = 'with-name';
@@ -15,9 +15,11 @@ const selector = [
 	'.param',
 ].join('');
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => ({
-	[selector]: node => {
-		const variables = context.getDeclaredVariables(node.parent);
+	[selector](node) {
+		const sourceCode = context.getSourceCode();
+		const variables = sourceCode.getDeclaredVariables(node.parent);
 
 		if (variables.some(variable => variable.references.length > 0)) {
 			return;
@@ -30,14 +32,14 @@ const create = context => ({
 			messageId: type === 'Identifier' ? MESSAGE_ID_WITH_NAME : MESSAGE_ID_WITHOUT_NAME,
 			data: {name},
 			* fix(fixer) {
-				const tokenBefore = context.getTokenBefore(node);
+				const tokenBefore = sourceCode.getTokenBefore(node);
 				assertToken(tokenBefore, {
 					test: isOpeningParenToken,
 					expected: '(',
 					ruleId: 'prefer-optional-catch-binding',
 				});
 
-				const tokenAfter = context.getTokenAfter(node);
+				const tokenAfter = sourceCode.getTokenAfter(node);
 				assertToken(tokenAfter, {
 					test: isClosingParenToken,
 					expected: ')',
@@ -50,7 +52,7 @@ const create = context => ({
 
 				const [, endOfClosingParenthesis] = tokenAfter.range;
 				const [startOfCatchClauseBody] = parent.body.range;
-				const text = context.getSourceCode().text.slice(endOfClosingParenthesis, startOfCatchClauseBody);
+				const text = sourceCode.text.slice(endOfClosingParenthesis, startOfCatchClauseBody);
 				const leadingSpacesLength = text.length - text.trimStart().length;
 				if (leadingSpacesLength !== 0) {
 					yield fixer.removeRange([endOfClosingParenthesis, endOfClosingParenthesis + leadingSpacesLength]);
@@ -60,6 +62,7 @@ const create = context => ({
 	},
 });
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {

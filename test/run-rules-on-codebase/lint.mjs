@@ -1,87 +1,84 @@
 #!/usr/bin/env node
 import process from 'node:process';
-import {ESLint} from 'eslint';
-import unicorn from '../../index.js';
+import {parseArgs} from 'node:util';
+// eslint-disable-next-line n/file-extension-in-import -- https://github.com/eslint-community/eslint-plugin-n/issues/50
+import eslintExperimentalApis from 'eslint/use-at-your-own-risk';
+import chalk from 'chalk';
+import {outdent} from 'outdent';
+import eslintPluginUnicorn from '../../index.js';
 
-const {recommended} = unicorn.configs;
-const files = [process.argv[2] || '.'];
-const fix = process.argv.includes('--fix');
+const {FlatESLint} = eslintExperimentalApis;
 
-const enableAllRules = Object.fromEntries(
-	Object.entries(recommended.rules)
-		.filter(([id]) => id.startsWith('unicorn/'))
-		.map(([id]) => [id, 'error']),
-);
-
-const eslint = new ESLint({
-	baseConfig: {
-		...recommended,
-		rules: enableAllRules,
+const {
+	values: {
+		fix = false,
 	},
-	useEslintrc: false,
-	extensions: ['.js', '.mjs'],
-	plugins: {
-		unicorn,
+	positionals: patterns,
+} = parseArgs({
+	options: {
+		fix: {
+			type: 'boolean',
+		},
 	},
-	fix,
-	overrideConfig: {
-		ignorePatterns: [
+	allowPositionals: true,
+});
+
+const configs = [
+	// TODO: Use `eslintPluginUnicorn.configs.all` instead when we change preset to flat config
+	{
+		plugins: {
+			unicorn: eslintPluginUnicorn,
+		},
+		rules: eslintPluginUnicorn.configs.all.rules,
+	},
+	{
+		ignores: [
 			'coverage',
 			'test/integration/fixtures',
 			'test/integration/fixtures-local',
+			// Ignore this file self temporarily, disabling `n/file-extension-in-import` comment cause error
+			'test/run-rules-on-codebase/lint.mjs',
 		],
+	},
+	{
 		rules: {
-			'unicorn/prevent-abbreviations': [
-				'error',
-				{
-					replacements: {
-						fn: false,
-					},
-				},
-			],
 			// https://github.com/sindresorhus/eslint-plugin-unicorn/issues/1109#issuecomment-782689255
 			'unicorn/consistent-destructuring': 'off',
-			'unicorn/prefer-array-flat': [
-				'error',
-				{
-					functions: [
-						'flat',
-						'flatten',
-					],
-				},
-			],
+			// Buggy
+			'unicorn/custom-error-definition': 'off',
+			'unicorn/consistent-function-scoping': 'off',
 			// Annoying
 			'unicorn/no-keyword-prefix': 'off',
 			'unicorn/no-unsafe-regex': 'off',
-			// Outdated
-			'unicorn/import-index': 'off',
 			// Not ready yet
 			'unicorn/prefer-string-replace-all': 'off',
-			'unicorn/prefer-top-level-await': 'off',
-			'unicorn/prefer-object-has-own': 'off',
 			'unicorn/prefer-at': 'off',
 		},
-		overrides: [
-			{
-				files: [
-					'**/*.js',
-				],
-				rules: {
-					'unicorn/prefer-module': 'off',
-				},
-			},
-		],
 	},
-});
+	{
+		files: [
+			'**/*.js',
+		],
+		rules: {
+			'unicorn/prefer-module': 'off',
+		},
+	},
+];
 
 const sum = (collection, fieldName) =>
 	collection.reduce((total, {[fieldName]: value}) => total + value, 0);
 
-(async function () {
-	const results = await eslint.lintFiles(files);
+async function run() {
+	const eslint = new FlatESLint({
+		overrideConfigFile: true,
+		overrideConfig: configs,
+		fix,
+	});
+
+	const results = await eslint.lintFiles(patterns.length === 0 ? ['.'] : patterns);
 
 	if (fix) {
-		await ESLint.outputFixes(results);
+		await FlatESLint.outputFixes(results);
 	}
 
 	const errorCount = sum(results, 'errorCount');
@@ -90,27 +87,38 @@ const sum = (collection, fieldName) =>
 	const fixableWarningCount = sum(results, 'fixableWarningCount');
 
 	const hasFixable = fixableErrorCount || fixableWarningCount;
+	const summary = outdent`
+		${results.length} files linted:
+			- error: ${chalk.gray(errorCount)}
+			- warning: ${chalk.gray(warningCount)}
+			- fixable error: ${chalk.gray(fixableErrorCount)}
+			- fixable warning: ${chalk.gray(fixableWarningCount)}
+	`;
 
 	if (errorCount || warningCount) {
+		console.log('*! If you\'re making a new rule, you can ignore this before review. !*');
+
+		console.log();
+		console.log(summary);
+
 		const {format} = await eslint.loadFormatter();
+		console.log();
 		console.log(format(results));
 
 		console.log();
-		console.log(`You need to fix the failed test${errorCount + warningCount > 1 ? 's' : ''} above and run \`npm run run-rules-on-codebase <file>\` to check again.`);
+		console.log(`You need to fix the failed test${errorCount + warningCount > 1 ? 's' : ''} above and run \`npm run run-rules-on-codebase -- <file>\` to check again.`);
 
 		if (hasFixable) {
 			console.log();
-			console.log('You may also want run `npm run run-rules-on-codebase <file> --fix` to fix fixable problems.');
+			console.log('You may also want run `npm run run-rules-on-codebase -- <file> --fix` to fix fixable problems.');
 		}
-
-		console.log();
-		console.log('* If you\'re making a new rule, you can fix this later. *');
 	} else {
+		console.log(summary);
+		console.log();
 		console.log('All tests have passed.');
 	}
 
 	process.exit(errorCount);
-})().catch(error => {
-	process.exitCode = 1;
-	console.error(error);
-});
+}
+
+await run();

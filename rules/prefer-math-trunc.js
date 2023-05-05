@@ -1,5 +1,5 @@
 'use strict';
-const {hasSideEffect} = require('eslint-utils');
+const {hasSideEffect} = require('@eslint-community/eslint-utils');
 const {fixSpaceAroundKeyword} = require('./fix/index.js');
 
 const ERROR_BITWISE = 'error-bitwise';
@@ -29,6 +29,7 @@ const bitwiseNotUnaryExpressionSelector = [
 	createBitwiseNotSelector(2, true),
 ].join('');
 
+/** @param {import('eslint').Rule.RuleContext} context */
 const create = context => {
 	const sourceCode = context.getSourceCode();
 
@@ -39,7 +40,7 @@ const create = context => {
 	};
 
 	return {
-		':matches(BinaryExpression, AssignmentExpression)[right.type="Literal"]': node => {
+		':matches(BinaryExpression, AssignmentExpression)[right.type="Literal"]'(node) {
 			const {type, operator, right, left} = node;
 			const isAssignment = type === 'AssignmentExpression';
 			if (
@@ -60,25 +61,21 @@ const create = context => {
 
 			if (!isAssignment || !hasSideEffect(left, sourceCode)) {
 				const fix = function * (fixer) {
-					let fixed = mathTruncFunctionCall(left);
+					const fixed = mathTruncFunctionCall(left);
 					if (isAssignment) {
-						// TODO[@fisker]: Improve this fix, don't touch left
-						fixed = `${sourceCode.getText(left)} = ${fixed}`;
+						const operatorToken = sourceCode.getTokenAfter(left, token => token.type === 'Punctuator' && token.value === operator);
+						yield fixer.replaceText(operatorToken, '=');
+						yield fixer.replaceText(right, fixed);
 					} else {
 						yield * fixSpaceAroundKeyword(fixer, node, sourceCode);
+						yield fixer.replaceText(node, fixed);
 					}
-
-					yield fixer.replaceText(node, fixed);
 				};
 
 				if (operator === '|') {
 					problem.suggest = [
 						{
 							messageId: SUGGESTION_BITWISE,
-							data: {
-								operator,
-								value: right.raw,
-							},
 							fix,
 						},
 					];
@@ -100,6 +97,7 @@ const create = context => {
 	};
 };
 
+/** @type {import('eslint').Rule.RuleModule} */
 module.exports = {
 	create,
 	meta: {
@@ -108,7 +106,7 @@ module.exports = {
 			description: 'Enforce the use of `Math.trunc` instead of bitwise operators.',
 		},
 		fixable: 'code',
-		messages,
 		hasSuggestions: true,
+		messages,
 	},
 };

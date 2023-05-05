@@ -242,7 +242,7 @@ const tests = {
 	invalid: [
 		{
 			code: 'let e',
-			errors: createErrors('Please rename the variable `e`. Suggested names are: `error`, `event`. A more descriptive name will do too.'),
+			errors: createErrors('Please rename the variable `e`. Suggested names are: `error`, `event_`. A more descriptive name will do too.'),
 		},
 		{
 			code: 'let eCbOpts',
@@ -369,8 +369,8 @@ const tests = {
 
 		{
 			code: 'let evt',
-			output: 'let event',
-			errors: createErrors('The variable `evt` should be named `event`. A more descriptive name will do too.'),
+			output: 'let event_',
+			errors: createErrors('The variable `evt` should be named `event_`. A more descriptive name will do too.'),
 		},
 		{
 			code: '({evt: 1})',
@@ -767,7 +767,7 @@ const tests = {
 		},
 		{
 			code: 'class Res {}',
-			errors: createErrors('Please rename the variable `Res`. Suggested names are: `Response`, `Result`. A more descriptive name will do too.'),
+			errors: createErrors('Please rename the variable `Res`. Suggested names are: `Response_`, `Result`. A more descriptive name will do too.'),
 		},
 		{
 			code: 'const Err = 1;',
@@ -792,7 +792,7 @@ const tests = {
 
 		{
 			code: 'let doc',
-			output: 'let document',
+			output: 'let document_',
 			errors: createErrors(),
 		},
 
@@ -1261,6 +1261,39 @@ const tests = {
 			options: noExtendDefaultAllowListOptions,
 			errors: createErrors(),
 		},
+
+		// #1937
+		{
+			code: 'const expectedRetVal = "that should be ok";',
+			output: 'const expectedReturnValue = "that should be ok";',
+			errors: createErrors(),
+		},
+		{
+			code: 'const retVal = "that should be ok";',
+			output: 'const returnValue = "that should be ok";',
+			errors: createErrors(),
+		},
+		{
+			code: 'const retValue = "that should be ok";',
+			output: 'const returnValue = "that should be ok";',
+			errors: createErrors(),
+		},
+		{
+			code: 'const returnVal = "that should be ok";',
+			output: 'const returnValue = "that should be ok";',
+			errors: createErrors(),
+		},
+		{
+			code: 'const sendDmMessage = () => {};',
+			output: 'const sendDirectMessage = () => {};',
+			options: [{replacements: {dm: {directMessage: true}}}],
+			errors: createErrors(),
+		},
+		{
+			code: 'const ret_val = "that should be ok";',
+			output: 'const returnValue_value = "that should be ok";',
+			errors: createErrors(),
+		},
 	],
 };
 
@@ -1271,6 +1304,7 @@ test.typescript(avoidTestTitleConflict(tests, 'typescript'));
 test({
 	testerOptions: {
 		parserOptions: {
+			sourceType: 'script',
 			ecmaVersion: 5,
 		},
 		env: {
@@ -1816,8 +1850,8 @@ test.typescript({
 				}
 			`,
 			output: outdent`
-				function onKeyDown(event: KeyboardEvent) {
-					if (event.keyCode) {}
+				function onKeyDown(event_: KeyboardEvent) {
+					if (event_.keyCode) {}
 				}
 			`,
 			options: [
@@ -1853,6 +1887,30 @@ test.typescript({
 				export type PreloadProps<TExtraProperties = null> = {};
 			`,
 			errors: [...createErrors(), ...createErrors()],
+		},
+	],
+});
+
+// JSX
+test.typescript({
+	testerOptions: {
+		parserOptions: {
+			ecmaFeatures: {
+				jsx: true,
+			},
+		},
+	},
+	valid: [],
+	invalid: [
+		// https://github.com/microsoft/fluentui/blob/ead191a8368bf64ecabffce5ea0e02565f449a95/packages/fluentui/docs/src/views/FocusTrapZoneDoc.tsx#L10
+		{
+			code: outdent`
+				import DocPage from '../components/DocPage';
+				export default () => (
+					<DocPage title="Focus Trap Zone"></DocPage>
+				);
+			`,
+			errors: 1,
 		},
 	],
 });
@@ -1906,7 +1964,7 @@ test({
 		{
 			code: 'foo();',
 			filename: '/path/to/doc/__prev-Attr$1Err__.conf.js',
-			errors: createErrors('The filename `/path/to/doc/__prev-Attr$1Err__.conf.js` should be named `__previous-Attribute$1Error__.config.js`. A more descriptive name will do too.'),
+			errors: createErrors('The filename `__prev-Attr$1Err__.conf.js` should be named `__previous-Attribute$1Error__.config.js`. A more descriptive name will do too.'),
 		},
 		{
 			code: 'foo();',
@@ -1944,5 +2002,36 @@ test({
 			],
 		},
 	],
+});
 
+test.vue({
+	valid: [],
+	invalid: [
+		{
+			code: outdent`
+				<template>
+					<button @click="goToPrev"/>
+				</template>
+				<script setup>
+				const goToPrev = () => {}
+				</script>
+			`,
+			errors: 1,
+		},
+		{
+			code: outdent`
+				<template><button/></template>
+				<script setup>
+				const goToPrev = () => {}
+				</script>
+			`,
+			output: outdent`
+				<template><button/></template>
+				<script setup>
+				const goToPrevious = () => {}
+				</script>
+			`,
+			errors: 1,
+		},
+	],
 });
